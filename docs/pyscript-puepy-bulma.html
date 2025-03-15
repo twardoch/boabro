@@ -452,28 +452,42 @@ class FontInspector(Page):
         with t.div(class_="box"):
             t.p("Select a .ttf or .otf font file to analyze, or provide a URL:", class_="mb-3")
             
-            # File upload field
+            # Drag-and-drop file upload area
             with t.div(class_="field"):
                 t.label("Font File", for_="font-upload", class_="label")
-                with t.div(class_="control has-icons-left"):
-                    t.input(
-                        type="file",
-                        accept=".ttf,.otf",
-                        id="font-upload",
-                        class_="input",
-                        on_change="fileSelected(event)",
+                with t.div(id="drag-drop-area", class_="box has-text-centered p-5", style="border: 2px dashed var(--border-visible); background-color: var(--bg-elevated);"):
+                    t.div(
+                        t.span(class_="icon is-large mb-3"),
+                        t.i(class_="fas fa-file-upload fa-2x"),
+                        t.p("Drag and drop a font file here, or click to select", class_="mb-3"),
+                        t.p(".ttf, .otf, .woff, .woff2 files accepted", class_="is-size-7 has-text-grey"),
+                        with t.div(class_="file is-centered mt-3"):
+                            with t.label(class_="file-label"):
+                                t.input(
+                                    type="file",
+                                    accept=".ttf,.otf,.woff,.woff2",
+                                    id="font-upload",
+                                    class_="file-input",
+                                    on_change="fileSelected(event)",
+                                )
+                                with t.span(class_="file-cta"):
+                                    with t.span(class_="file-icon"):
+                                        t.i(class_="fas fa-upload")
+                                    with t.span(class_="file-label"):
+                                        t.text("Choose a file")
                     )
-                    with t.span(class_="icon is-small is-left"):
-                        t.i(class_="fas fa-file")
             
-            # Show selected filename
+            # Show selected filename with preview icon
             with t.div(class_="field mt-2"):
                 with t.div(class_="control"):
-                    t.div(
-                        "Selected file: ",
-                        t.span("No file chosen", id="file-name-display"),
-                        class_="is-size-7 has-text-grey"
-                    )
+                    with t.div(class_="notification is-light p-3", style="display: none;", id="file-selected-notification"):
+                        with t.div(class_="is-flex is-align-items-center"):
+                            with t.span(class_="icon mr-2"):
+                                t.i(class_="fas fa-check-circle has-text-success")
+                            t.span("Selected file: ", class_="has-text-weight-bold")
+                            t.span("No file chosen", id="file-name-display", class_="ml-1")
+                            with t.button(class_="delete ml-auto", on_click="clearFileSelection()"):
+                                t.text("")
             
             # Font URL field
             with t.div(class_="field mt-3"):
