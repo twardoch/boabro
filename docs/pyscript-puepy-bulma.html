@@ -505,17 +505,52 @@ class FontInspector(Page):
                         t.i(class_="fas fa-link")
                 t.p("If both file and URL are provided, the file will be used.", class_="help")
             
-            # Process button
+            # Process button with loading animation
             with t.div(class_="field mt-4"):
-                with t.div(class_="control"):
-                    button_text = "Processing..." if self.state["is_processing"] else "Process Font"
-                    button_class = "button is-primary is-loading" if self.state["is_processing"] else "button is-primary"
-                    t.button(
-                        button_text,
-                        class_=button_class,
-                        on_click=self.on_process_click,
-                        disabled=self.state["is_processing"],
-                    )
+                with t.div(class_="is-flex is-justify-content-center">
+                    with t.div(class_="control">
+                        button_text = "Processing..." if self.state["is_processing"] else "Process Font"
+                        button_class = "button is-primary is-medium is-loading" if self.state["is_processing"] else "button is-primary is-medium"
+                        t.button(
+                            t.span(class_="icon mr-1"),
+                            t.i(class_="fas fa-cog"),
+                            t.span(button_text),
+                            class_=button_class,
+                            on_click=self.on_process_click,
+                            disabled=self.state["is_processing"],
+                            id="process-button"
+                        )
+                        
+            # Loading animation overlay (hidden by default)
+            with t.div(id="loading-overlay", class_="modal", style="display: none;"):
+                with t.div(class_="modal-background", style="background-color: rgba(0, 0, 0, 0.7);"):
+                    t.text("")
+                with t.div(class_="modal-content has-text-centered">
+                    with t.div(class_="box" style="background-color: var(--bg-elevated); max-width: 400px; margin: 0 auto;"):
+                        with t.div(class_="mb-4">
+                            t.progress(class_="progress is-primary", max="100")
+                        t.p("Processing font file...", id="loading-message", class_="has-text-white")
+                        with t.p(class_="is-size-7 mt-2 has-text-grey">
+                            t.text("This may take a moment depending on the font size and complexity")
+                            
+            # Add script to show/hide loading overlay
+            t.script("""
+            function showLoading(message) {
+                const loadingOverlay = document.getElementById('loading-overlay');
+                const loadingMessage = document.getElementById('loading-message');
+                if (loadingOverlay && loadingMessage) {
+                    loadingMessage.textContent = message || 'Processing font file...';
+                    loadingOverlay.style.display = 'flex';
+                }
+            }
+            
+            function hideLoading() {
+                const loadingOverlay = document.getElementById('loading-overlay');
+                if (loadingOverlay) {
+                    loadingOverlay.style.display = 'none';
+                }
+            }
+            """)
         
         # Inline script for file selection feedback
         t.script("""
