@@ -713,14 +713,27 @@ class FontInspector(Page):
         debug_log(f"Fetching font from URL: {url}")
         import pyodide.http
         
+        # Validate URL
+        if not url.startswith(('http://', 'https://')):
+            debug_log("Invalid URL: URL must start with http:// or https://")
+            self.state["error"] = "Invalid URL: URL must start with http:// or https://"
+            return None
+            
+        # Check file extension
+        valid_extensions = ['.ttf', '.otf', '.woff', '.woff2']
+        has_valid_extension = any(url.lower().endswith(ext) for ext in valid_extensions)
+        if not has_valid_extension:
+            debug_log(f"Warning: URL may not point to a font file. Expected extensions: {', '.join(valid_extensions)}")
+            # Don't return immediately, still try to fetch
+        
         try:
             # Add custom headers to help with CORS issues
             headers = {
                 "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/91.0.4472.124 Safari/537.36",
                 "Accept": "*/*",
                 "Accept-Language": "en-US,en;q=0.9",
-                "Referer": "https://127.0.0.1:8081/",
-                "Origin": "https://127.0.0.1:8081"
+                "Referer": window.location.href,
+                "Origin": window.location.origin
             }
             
             debug_log(f"Sending request with custom headers")
@@ -730,7 +743,8 @@ class FontInspector(Page):
                 "https://corsproxy.io/?url=",
                 "https://api.allorigins.win/raw?url=",
                 "https://cors.eu.org/",
-                "https://xofix.4kb.dev/?url="
+                "https://xofix.4kb.dev/?url=",
+                "https://corsproxy.org/?url="  # Adding another option
             ]
 
             
