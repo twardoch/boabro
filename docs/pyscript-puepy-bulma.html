@@ -520,13 +520,78 @@ class FontInspector(Page):
         # Inline script for file selection feedback
         t.script("""
         function fileSelected(event) {
-            const fileName = event.target.files.length > 0 ? event.target.files[0].name : 'No file chosen';
-            document.getElementById('file-name-display').textContent = fileName;
+            const fileInput = event.target;
+            const files = fileInput.files;
+            const fileName = files.length > 0 ? files[0].name : 'No file chosen';
+            const fileDisplay = document.getElementById('file-name-display');
+            const notification = document.getElementById('file-selected-notification');
             
-            // Signal Python to process
-            const fileSelectedEvent = new CustomEvent('fileSelected');
-            document.dispatchEvent(fileSelectedEvent);
+            if (files.length > 0) {
+                fileDisplay.textContent = fileName;
+                notification.style.display = 'block';
+                
+                // Signal Python to process
+                const fileSelectedEvent = new CustomEvent('fileSelected');
+                document.dispatchEvent(fileSelectedEvent);
+            } else {
+                clearFileSelection();
+            }
         }
+        
+        function clearFileSelection() {
+            const fileInput = document.getElementById('font-upload');
+            const fileDisplay = document.getElementById('file-name-display');
+            const notification = document.getElementById('file-selected-notification');
+            
+            fileInput.value = '';
+            fileDisplay.textContent = 'No file chosen';
+            notification.style.display = 'none';
+        }
+        
+        // Add event listeners for drag and drop once DOM is loaded
+        document.addEventListener('DOMContentLoaded', () => {
+            const dropArea = document.getElementById('drag-drop-area');
+            
+            if (dropArea) {
+                ['dragenter', 'dragover', 'dragleave', 'drop'].forEach(eventName => {
+                    dropArea.addEventListener(eventName, preventDefaults, false);
+                });
+                
+                function preventDefaults(e) {
+                    e.preventDefault();
+                    e.stopPropagation();
+                }
+                
+                ['dragenter', 'dragover'].forEach(eventName => {
+                    dropArea.addEventListener(eventName, highlight, false);
+                });
+                
+                ['dragleave', 'drop'].forEach(eventName => {
+                    dropArea.addEventListener(eventName, unhighlight, false);
+                });
+                
+                function highlight() {
+                    dropArea.classList.add('has-background-dark');
+                }
+                
+                function unhighlight() {
+                    dropArea.classList.remove('has-background-dark');
+                }
+                
+                dropArea.addEventListener('drop', handleDrop, false);
+                
+                function handleDrop(e) {
+                    const fileInput = document.getElementById('font-upload');
+                    const dt = e.dataTransfer;
+                    const files = dt.files;
+                    
+                    if (files.length > 0) {
+                        fileInput.files = files;
+                        fileSelected({target: fileInput});
+                    }
+                }
+            }
+        });
         """)
         
         # Error message
