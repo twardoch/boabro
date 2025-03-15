@@ -1,0 +1,1088 @@
+<!DOCTYPE html>
+<html lang="en" data-theme="dark">
+<head>
+<!-- this_file: docs/pyscript-puepy-bulma.html -->
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Boabro Font Inspector - PyScript + Puepy + Bulma</title>
+<!-- Bulma CSS -->
+<link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/bulma@0.9.3/css/bulma.min.css">
+<!-- Font Awesome for icons -->
+<link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.4.0/css/all.min.css">
+<!-- PyScript CSS and JS -->
+<link rel="stylesheet" href="https://pyscript.net/releases/2024.10.2/core.css">
+<script type="module" src="https://pyscript.net/releases/2024.10.2/core.js"></script>
+<style>
+  /* CSS Custom Properties for consistent colors */
+  :root {
+    --bg-primary: #121212;
+    --bg-surface: #1e1e2d;
+    --bg-elevated: #2d2d3a;
+    --border-subtle: rgba(255, 255, 255, 0.1);
+    --border-visible: rgba(255, 255, 255, 0.2);
+    --text-primary: rgba(255, 255, 255, 0.95);
+    --text-secondary: rgba(255, 255, 255, 0.8);
+    --text-tertiary: rgba(255, 255, 255, 0.6);
+    --accent-primary: #7c4dff;
+    --accent-hover: #9969ff;
+    --shadow-sm: 0 2px 4px rgba(0, 0, 0, 0.2);
+    --shadow-md: 0 4px 8px rgba(0, 0, 0, 0.3);
+    --shadow-lg: 0 8px 16px rgba(0, 0, 0, 0.4);
+  }
+
+  body {
+    background-color: var(--bg-primary);
+    color: var(--text-primary);
+    min-height: 100vh;
+  }
+
+  .navbar.is-dark {
+    background: var(--bg-elevated);
+    box-shadow: var(--shadow-md);
+    border-bottom: 1px solid var(--border-subtle);
+    backdrop-filter: blur(10px);
+    -webkit-backdrop-filter: blur(10px);
+  }
+
+  .box {
+    background-color: var(--bg-surface);
+    border-radius: 12px;
+    box-shadow: var(--shadow-md);
+    border: 1px solid var(--border-visible);
+    transition: all 0.3s ease;
+  }
+
+  .box:hover {
+    box-shadow: var(--shadow-lg);
+    transform: translateY(-2px);
+  }
+
+  .title, .subtitle {
+    color: var(--text-primary);
+  }
+
+  .button.is-primary {
+    background-color: var(--accent-primary);
+    transition: all 0.3s ease;
+    border: none;
+  }
+
+  .button.is-primary:hover {
+    background-color: var(--accent-hover);
+    transform: translateY(-1px);
+  }
+
+  .button.is-light {
+    background-color: var(--bg-elevated);
+    color: var(--text-primary);
+    border: 1px solid var(--border-visible);
+  }
+
+  .button.is-light:hover {
+    background-color: var(--bg-surface);
+    color: var(--text-primary);
+    border-color: var(--border-visible);
+  }
+
+  .input, .select select {
+    background-color: var(--bg-elevated);
+    color: var(--text-primary);
+    border: 1px solid var(--border-visible);
+    box-shadow: inset var(--shadow-sm);
+  }
+
+  .input:focus, .select select:focus {
+    border-color: var(--accent-primary);
+    box-shadow: 0 0 0 2px rgba(124, 77, 255, 0.25);
+  }
+
+  .notification.is-light {
+    background-color: var(--bg-elevated);
+    color: var(--text-primary);
+  }
+
+  .notification.is-danger {
+    background-color: #cf6679;
+    color: #000000;
+  }
+
+  .debug-console {
+    max-height: 200px;
+    overflow-y: auto;
+    font-family: 'JetBrains Mono', monospace;
+    font-size: 0.85rem;
+    line-height: 1.5;
+    background-color: var(--bg-primary);
+    border: 1px solid var(--border-visible);
+    border-radius: 8px;
+    padding: 1rem;
+    color: var(--text-primary);
+  }
+
+  .debug-console div {
+    padding: 4px 0;
+    border-bottom: 1px solid var(--border-subtle);
+  }
+
+  .file-cta {
+    background-color: var(--bg-elevated);
+    color: var(--text-primary);
+    border: 1px solid var(--border-visible);
+  }
+
+  .file:hover .file-cta {
+    background-color: var(--bg-surface);
+    color: var(--text-primary);
+  }
+
+  /* Custom scrollbar */
+  ::-webkit-scrollbar {
+    width: 8px;
+    height: 8px;
+  }
+
+  ::-webkit-scrollbar-track {
+    background: var(--bg-surface);
+  }
+
+  ::-webkit-scrollbar-thumb {
+    background: var(--bg-elevated);
+    border-radius: 4px;
+  }
+
+  ::-webkit-scrollbar-thumb:hover {
+    background: var(--accent-primary);
+  }
+
+  /* Loading animation */
+  @keyframes pulse {
+    0% { opacity: 0.4; }
+    50% { opacity: 0.8; }
+    100% { opacity: 0.4; }
+  }
+
+  .loading-pulse {
+    animation: pulse 1.5s infinite ease-in-out;
+  }
+
+  /* Font info display */
+  .font-info {
+    display: grid;
+    gap: 1rem;
+    grid-template-columns: repeat(auto-fit, minmax(280px, 1fr));
+  }
+
+  .font-info-item {
+    background: var(--bg-elevated);
+    border: 1px solid var(--border-visible);
+    border-radius: 8px;
+    padding: 1rem;
+  }
+
+  .font-info-label {
+    color: var(--text-secondary);
+    font-size: 0.85rem;
+    font-weight: 600;
+    text-transform: uppercase;
+    letter-spacing: 0.5px;
+    margin-bottom: 0.5rem;
+  }
+
+  .font-info-value {
+    color: var(--text-primary);
+    font-family: 'JetBrains Mono', monospace;
+    background: var(--bg-primary);
+    padding: 0.75rem;
+    border-radius: 4px;
+    border: 1px solid var(--border-subtle);
+    word-break: break-all;
+  }
+
+  pre {
+    background-color: var(--bg-primary);
+    color: var(--text-primary);
+    border-radius: 8px;
+    padding: 1rem;
+    border: 1px solid var(--border-subtle);
+  }
+  
+  /* Font preview section */
+  .font-preview {
+    background-color: var(--bg-elevated);
+    border-radius: 8px;
+    padding: 1.5rem;
+    margin-top: 1.5rem;
+    border: 1px solid var(--border-visible);
+  }
+  
+  .preview-text {
+    font-size: 2rem;
+    line-height: 1.4;
+    margin-bottom: 1rem;
+    word-break: break-word;
+  }
+  
+  .preview-controls {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 1rem;
+    margin-bottom: 1rem;
+  }
+  
+  .preview-size-control {
+    width: 100%;
+    max-width: 300px;
+  }
+  
+  /* Tabs for font information */
+  .tabs-content .tab-content {
+    display: none;
+    padding: 1rem;
+    background-color: var(--bg-surface);
+    border-radius: 0 0 8px 8px;
+    border: 1px solid var(--border-visible);
+    border-top: none;
+  }
+  
+  .tabs-content .tab-content.is-active {
+    display: block;
+  }
+  
+  .tabs li.is-active a {
+    border-color: var(--accent-primary);
+    color: var(--accent-primary);
+  }
+  
+  /* Help modal */
+  .modal-card-head, .modal-card-foot {
+    background-color: var(--bg-elevated);
+    border-color: var(--border-visible);
+  }
+  
+  .modal-card-body {
+    background-color: var(--bg-surface);
+    color: var(--text-primary);
+  }
+  
+  .modal-card-title {
+    color: var(--text-primary);
+  }
+  
+  /* Responsive improvements */
+  @media screen and (max-width: 768px) {
+    .preview-controls {
+      flex-direction: column;
+    }
+    
+    .preview-size-control {
+      max-width: 100%;
+    }
+  }
+</style>
+</head>
+<body>
+<!-- Navigation Bar -->
+<nav class="navbar is-dark" role="navigation" aria-label="main navigation">
+  <div class="container">
+    <div class="navbar-brand">
+      <a class="navbar-item" href="#">
+        <i class="fas fa-font mr-2"></i>
+        <strong>Boabro Font Inspector</strong>
+      </a>
+      
+      <a role="button" class="navbar-burger" aria-label="menu" aria-expanded="false" data-target="navMenu">
+        <span aria-hidden="true"></span>
+        <span aria-hidden="true"></span>
+        <span aria-hidden="true"></span>
+      </a>
+    </div>
+    
+    <div id="navMenu" class="navbar-menu">
+      <div class="navbar-end">
+        <div class="navbar-item">
+          <div class="buttons">
+            <a class="button is-light is-small js-modal-trigger" data-target="helpModal">
+              <span class="icon">
+                <i class="fas fa-question-circle"></i>
+              </span>
+              <span>Help</span>
+            </a>
+            <a class="button is-primary is-small" href="https://github.com/twardoch/boabro" target="_blank" rel="noopener">
+              <span class="icon">
+                <i class="fab fa-github"></i>
+              </span>
+              <span>GitHub</span>
+            </a>
+          </div>
+        </div>
+      </div>
+    </div>
+  </div>
+</nav>
+
+<!-- Help Modal -->
+<div id="helpModal" class="modal">
+  <div class="modal-background"></div>
+  <div class="modal-card">
+    <header class="modal-card-head">
+      <p class="modal-card-title">Font Inspector Help</p>
+      <button class="delete" aria-label="close"></button>
+    </header>
+    <section class="modal-card-body">
+      <div class="content">
+        <h4>About This Tool</h4>
+        <p>The Boabro Font Inspector allows you to analyze TrueType (.ttf) and OpenType (.otf) font files.</p>
+        
+        <h4>How to Use</h4>
+        <ol>
+          <li>Upload a font file using the file selector, or</li>
+          <li>Provide a URL to a font file</li>
+          <li>Click "Process Font" to analyze the font</li>
+        </ol>
+        
+        <h4>Features</h4>
+        <ul>
+          <li>View basic font metadata (family name, style, etc.)</li>
+          <li>Preview the font with custom text</li>
+          <li>Examine font tables and features</li>
+        </ul>
+        
+        <h4>Troubleshooting</h4>
+        <p>If you encounter CORS issues when loading fonts from URLs, try downloading the font file and uploading it directly.</p>
+        
+        <h4>About Boabro</h4>
+        <p>Boabro is a collection of font tools. Visit the <a href="https://github.com/twardoch/boabro" target="_blank" rel="noopener">GitHub repository</a> for more information.</p>
+      </div>
+    </section>
+    <footer class="modal-card-foot">
+      <button class="button is-primary">Got it!</button>
+    </footer>
+  </div>
+</div>
+
+<section class="section">
+  <div class="container main-container">
+    <div class="columns is-centered">
+      <div class="column is-10">
+        <div class="box">
+          <h2 class="title is-4 has-text-centered mb-5">
+            <span class="icon mr-2">
+              <i class="fas fa-font"></i>
+            </span>
+            Boabro Font Inspector Tool
+          </h2>
+          <div id="app">
+            <div class="has-text-centered py-5">
+              <div class="button is-loading is-primary is-large loading-pulse"></div>
+              <p class="mt-3">Loading application...</p>
+            </div>
+          </div>
+        </div>
+        
+        <div class="box mt-4">
+          <h3 class="title is-5 has-text-centered mb-4">
+            <span class="icon mr-2">
+              <i class="fas fa-terminal"></i>
+            </span>
+            Debug Console
+          </h3>
+          <div id="debug" class="debug-console p-3"></div>
+        </div>
+      </div>
+    </div>
+  </div>
+</section>
+
+<footer class="footer has-background-dark has-text-centered py-3">
+  <div class="content has-text-grey-light">
+    <p>
+      Boabro Font Inspector Tool &copy; 2025 | 
+      <a href="https://github.com/twardoch/boabro" target="_blank" rel="noopener" class="has-text-grey-light">GitHub</a> | 
+      Built with <a href="https://pyscript.net/" target="_blank" rel="noopener" class="has-text-grey-light">PyScript</a>, 
+      <a href="https://github.com/twardoch/puepy" target="_blank" rel="noopener" class="has-text-grey-light">Puepy</a>, and 
+      <a href="https://bulma.io/" target="_blank" rel="noopener" class="has-text-grey-light">Bulma</a>
+    </p>
+  </div>
+</footer>
+
+<script type="py" config='{"packages":["puepy","fonttools"]}'>
+from puepy import Page, Application, t
+import io
+import traceback
+import json
+from fontTools.ttLib import TTFont
+from js import document, console, CSS, CSSStyleSheet, window
+from pyodide.ffi import create_proxy
+
+def debug_log(message):
+    debug_div = document.getElementById("debug")
+    if debug_div:
+        debug_div.innerHTML += f"<div>{message}</div>"
+        # Auto-scroll to bottom
+        debug_div.scrollTop = debug_div.scrollHeight
+    console.log(message)
+
+debug_log("Script started")
+
+app = Application()
+
+@app.page()
+class FontInspector(Page):
+    def initial(self):
+        debug_log("Initial state created")
+        return {
+            "info": "",
+            "error": "",
+            "file_data": None,
+            "font_url": "https://github.com/google/fonts/raw/refs/heads/main/ofl/abrilfatface/AbrilFatface-Regular.ttf",
+            "is_processing": False,
+            "font_loaded": False,
+            "preview_text": "The quick brown fox jumps over the lazy dog",
+            "preview_size": 36,
+            "font_name": "",
+            "active_tab": "basic",
+            "detailed_info": {},
+        }
+
+    def populate(self):
+        t.h3("Upload Font File", class_="title is-5 mb-4")
+        
+        # Font input section
+        with t.div(class_="box"):
+            t.p("Select a .ttf or .otf font file to analyze, or provide a URL:", class_="mb-3")
+            
+            # File upload field
+            with t.div(class_="field"):
+                t.label("Font File", for_="font-upload", class_="label")
+                with t.div(class_="control has-icons-left"):
+                    t.input(
+                        type="file",
+                        accept=".ttf,.otf",
+                        id="font-upload",
+                        class_="input",
+                        on_change="fileSelected(event)",
+                    )
+                    with t.span(class_="icon is-small is-left"):
+                        t.i(class_="fas fa-file")
+            
+            # Show selected filename
+            with t.div(class_="field mt-2"):
+                with t.div(class_="control"):
+                    t.div(
+                        "Selected file: ",
+                        t.span("No file chosen", id="file-name-display"),
+                        class_="is-size-7 has-text-grey"
+                    )
+            
+            # Font URL field
+            with t.div(class_="field mt-3"):
+                t.label("Font URL", for_="font-url", class_="label")
+                with t.div(class_="control has-icons-left"):
+                    t.input(
+                        type="url",
+                        id="font-url",
+                        class_="input",
+                        value=self.state["font_url"],
+                        placeholder="https://example.com/font.ttf",
+                        on_input=self.on_url_change,
+                    )
+                    with t.span(class_="icon is-small is-left"):
+                        t.i(class_="fas fa-link")
+                t.p("If both file and URL are provided, the file will be used.", class_="help")
+            
+            # Process button
+            with t.div(class_="field mt-4"):
+                with t.div(class_="control"):
+                    button_text = "Processing..." if self.state["is_processing"] else "Process Font"
+                    button_class = "button is-primary is-loading" if self.state["is_processing"] else "button is-primary"
+                    t.button(
+                        button_text,
+                        class_=button_class,
+                        on_click=self.on_process_click,
+                        disabled=self.state["is_processing"],
+                    )
+        
+        # Inline script for file selection feedback
+        t.script("""
+        function fileSelected(event) {
+            const fileName = event.target.files.length > 0 ? event.target.files[0].name : 'No file chosen';
+            document.getElementById('file-name-display').textContent = fileName;
+            
+            // Signal Python to process
+            const fileSelectedEvent = new CustomEvent('fileSelected');
+            document.dispatchEvent(fileSelectedEvent);
+        }
+        """)
+        
+        # Error message
+        if self.state["error"]:
+            with t.div(class_="notification is-danger mt-4"):
+                t.p(self.state["error"])
+        
+        # Font preview section (only shown when font is loaded)
+        if self.state["font_loaded"]:
+            with t.div(class_="box mt-4"):
+                t.h4(f"Font Preview: {self.state['font_name']}", class_="title is-5 mb-3")
+                
+                # Preview controls
+                with t.div(class_="preview-controls"):
+                    # Text input
+                    with t.div(class_="field is-flex-grow-1"):
+                        t.label("Preview Text", class_="label")
+                        with t.div(class_="control"):
+                            t.input(
+                                type="text",
+                                class_="input",
+                                value=self.state["preview_text"],
+                                on_input=self.on_preview_text_change,
+                                placeholder="Enter text to preview"
+                            )
+                    
+                    # Size slider
+                    with t.div(class_="field preview-size-control"):
+                        t.label(f"Size: {self.state['preview_size']}px", class_="label")
+                        with t.div(class_="control"):
+                            t.input(
+                                type="range",
+                                min="8",
+                                max="72",
+                                value=str(self.state["preview_size"]),
+                                class_="slider is-fullwidth",
+                                on_input=self.on_size_change
+                            )
+                
+                # Preview area
+                with t.div(class_="font-preview", id="preview-area"):
+                    t.div(
+                        self.state["preview_text"],
+                        id="preview-text",
+                        class_="preview-text",
+                        style=f"font-size: {self.state['preview_size']}px;"
+                    )
+            
+            # Font information tabs
+            with t.div(class_="box mt-4"):
+                t.h4("Font Information", class_="title is-5 mb-3")
+                
+                # Tabs
+                with t.div(class_="tabs"):
+                    with t.ul():
+                        t.li(
+                            t.a("Basic Info", on_click=lambda e: self.set_active_tab("basic")),
+                            class_="is-active" if self.state["active_tab"] == "basic" else ""
+                        )
+                        t.li(
+                            t.a("Tables", on_click=lambda e: self.set_active_tab("tables")),
+                            class_="is-active" if self.state["active_tab"] == "tables" else ""
+                        )
+                        t.li(
+                            t.a("Features", on_click=lambda e: self.set_active_tab("features")),
+                            class_="is-active" if self.state["active_tab"] == "features" else ""
+                        )
+                
+                # Tab content
+                with t.div(class_="tabs-content"):
+                    # Basic info tab
+                    with t.div(
+                        class_=f"tab-content {'is-active' if self.state['active_tab'] == 'basic' else ''}",
+                        id="tab-basic"
+                    ):
+                        with t.div(class_="notification is-light"):
+                            t.pre(self.state["info"])
+                    
+                    # Tables tab
+                    with t.div(
+                        class_=f"tab-content {'is-active' if self.state['active_tab'] == 'tables' else ''}",
+                        id="tab-tables"
+                    ):
+                        if "tables" in self.state["detailed_info"]:
+                            with t.div(class_="font-info"):
+                                for table, description in self.state["detailed_info"]["tables"].items():
+                                    with t.div(class_="font-info-item"):
+                                        t.div(table, class_="font-info-label")
+                                        t.div(description, class_="font-info-value")
+                        else:
+                            t.p("No table information available.")
+                    
+                    # Features tab
+                    with t.div(
+                        class_=f"tab-content {'is-active' if self.state['active_tab'] == 'features' else ''}",
+                        id="tab-features"
+                    ):
+                        if "features" in self.state["detailed_info"]:
+                            with t.div(class_="notification is-light"):
+                                t.pre(json.dumps(self.state["detailed_info"]["features"], indent=2))
+                        else:
+                            t.p("No feature information available.")
+                
+                # Reset button
+                with t.div(class_="field mt-3"):
+                    t.button("Reset", class_="button is-light", on_click=self.on_reset_click)
+
+    def attached(self):
+        debug_log("Setting up file change handler")
+        
+        # File change handler
+        async def on_file_change(event):
+            debug_log("File input changed")
+            try:
+                file = event.target.files.item(0)
+                if not file:
+                    debug_log("No file selected")
+                    return
+                    
+                debug_log(f"File selected: {file.name}")
+                
+                # Read file data
+                array_buffer = await file.arrayBuffer()
+                data = array_buffer.to_bytes()
+                debug_log(f"Read {len(data)} bytes")
+                
+                # Store data for processing
+                self.state["file_data"] = data
+                debug_log("File data stored in state")
+                
+                # Process immediately
+                self.process_font()
+                
+            except Exception as e:
+                debug_log(f"Error reading file: {str(e)}")
+                debug_log(traceback.format_exc())
+                self.state["error"] = f"Error reading file: {str(e)}"
+                
+        # Set up event listener with proper cleanup
+        callback = create_proxy(on_file_change)
+        
+        # Listen for the custom file selected event
+        def on_file_selected(event):
+            debug_log("Custom file selected event received")
+            self.on_process_click(None)
+            
+        file_selected_callback = create_proxy(on_file_selected)
+        document.addEventListener("fileSelected", file_selected_callback)
+        debug_log("Added custom fileSelected event listener")
+        
+        # Ensure handler is attached after DOM is fully ready
+        def attach_handler():
+            # Get the file input element
+            upload = document.getElementById("font-upload")
+            if upload:
+                # Try to remove any existing listeners first
+                try:
+                    upload.removeEventListener("change", callback)
+                except:
+                    pass
+                
+                # Add the event listener
+                upload.addEventListener("change", callback)
+                debug_log("Change event listener attached")
+                
+                # Also add input event listener as fallback
+                try:
+                    upload.addEventListener("input", callback)
+                    debug_log("Input event listener attached as fallback")
+                except:
+                    pass
+            else:
+                debug_log("ERROR: Could not find upload element")
+        
+        # Run the attach handler
+        attach_handler()
+
+    def set_active_tab(self, tab_name):
+        debug_log(f"Setting active tab to: {tab_name}")
+        self.state["active_tab"] = tab_name
+
+    def on_preview_text_change(self, event):
+        self.state["preview_text"] = event.target.value
+        # Update the preview text
+        preview_text = document.getElementById("preview-text")
+        if preview_text:
+            preview_text.textContent = self.state["preview_text"]
+
+    def on_size_change(self, event):
+        size = int(event.target.value)
+        self.state["preview_size"] = size
+        # Update the preview size
+        preview_text = document.getElementById("preview-text")
+        if preview_text:
+            preview_text.style.fontSize = f"{size}px"
+
+    async def fetch_font_from_url(self, url):
+        debug_log(f"Fetching font from URL: {url}")
+        import pyodide.http
+        
+        try:
+            # Add custom headers to help with CORS issues
+            headers = {
+                "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/91.0.4472.124 Safari/537.36",
+                "Accept": "*/*",
+                "Accept-Language": "en-US,en;q=0.9",
+                "Referer": "https://127.0.0.1:8081/",
+                "Origin": "https://127.0.0.1:8081"
+            }
+            
+            debug_log(f"Sending request with custom headers")
+            
+            # Try with multiple CORS proxies in sequence
+            cors_proxies = [
+                "https://corsproxy.io/?url=",
+                "https://api.allorigins.win/raw?url=",
+                "https://cors.eu.org/",
+                "https://xofix.4kb.dev/?url="
+            ]
+
+            
+            # If it's a GitHub URL, try to use a more direct approach first
+            if "github.com" in url and "raw" in url:
+                # Try to convert to raw.githubusercontent.com if not already
+                if "raw.githubusercontent.com" not in url:
+                    # Convert github.com URL to raw.githubusercontent.com
+                    raw_url = url.replace("github.com", "raw.githubusercontent.com")
+                    raw_url = raw_url.replace("/blob/", "/")
+                    debug_log(f"Converted to raw URL: {raw_url}")
+                    try:
+                        response = await pyodide.http.pyfetch(raw_url, headers=headers)
+                        if response.status == 200:
+                            font_data = await response.bytes()
+                            debug_log(f"Successfully fetched {len(font_data)} bytes from raw URL")
+                            return font_data
+                    except Exception as raw_error:
+                        debug_log(f"Raw URL request failed: {str(raw_error)}")
+            
+            # Try each CORS proxy in sequence
+            for proxy in cors_proxies:
+                proxy_url = f"{proxy}{url}"
+                debug_log(f"Trying CORS proxy: {proxy_url}")
+                try:
+                    response = await pyodide.http.pyfetch(proxy_url, headers=headers)
+                    if response.status == 200:
+                        font_data = await response.bytes()
+                        debug_log(f"Successfully fetched {len(font_data)} bytes from proxy: {proxy}")
+                        return font_data
+                    else:
+                        debug_log(f"Proxy {proxy} request failed with status {response.status}")
+                except Exception as proxy_error:
+                    debug_log(f"Proxy {proxy} request failed: {str(proxy_error)}")
+            
+            # Try direct request with custom headers as fallback
+            debug_log("Trying direct URL request")
+            try:
+                response = await pyodide.http.pyfetch(url, headers=headers)
+                if response.status == 200:
+                    font_data = await response.bytes()
+                    debug_log(f"Successfully fetched {len(font_data)} bytes from direct URL")
+                    return font_data
+                else:
+                    debug_log(f"Direct request failed with status {response.status}")
+                    
+                    # Try with no-cors mode as a last resort
+                    debug_log("Attempting with no-cors mode")
+                    try:
+                        response = await pyodide.http.pyfetch(url, headers=headers, mode="no-cors")
+                        font_data = await response.bytes()
+                        debug_log(f"Successfully fetched {len(font_data)} bytes with no-cors mode")
+                        return font_data
+                    except Exception as no_cors_error:
+                        debug_log(f"No-cors request failed: {str(no_cors_error)}")
+            except Exception as direct_error:
+                debug_log(f"Direct request failed: {str(direct_error)}")
+            
+            # If we got here, all attempts failed
+            self.state["error"] = f"Failed to fetch font. CORS policy may be blocking the request. Try downloading the font and uploading it directly."
+            return None
+                
+        except Exception as e:
+            debug_log(f"Error fetching font: {str(e)}")
+            debug_log(traceback.format_exc())
+            self.state["error"] = f"Error fetching font: {str(e)}. Try downloading the font and uploading it directly."
+            return None
+            
+    def on_process_click(self, event):
+        debug_log("Process button clicked")
+        self.state["is_processing"] = True
+        
+        # Get file directly from the input element
+        upload = document.getElementById("font-upload")
+        if upload and upload.files and upload.files.length > 0:
+            debug_log("Found file in input element - will use uploaded file")
+            
+            # Access file directly from the input element
+            async def process_file():
+                try:
+                    file = upload.files.item(0)
+                    debug_log(f"Processing file: {file.name}")
+                    
+                    # Read file data
+                    array_buffer = await file.arrayBuffer()
+                    data = array_buffer.to_bytes()
+                    debug_log(f"Read {len(data)} bytes")
+                    
+                    # Store data for processing
+                    self.state["file_data"] = data
+                    
+                    # Process immediately
+                    self.process_font()
+                    
+                except Exception as e:
+                    debug_log(f"Error accessing file: {str(e)}")
+                    debug_log(traceback.format_exc())
+                    self.state["error"] = f"Error accessing file: {str(e)}"
+                    self.state["is_processing"] = False
+            
+            # Run the async function
+            import asyncio
+            asyncio.ensure_future(process_file())
+            return
+        
+        # If no file is uploaded, try using the URL
+        url_input = document.getElementById("font-url")
+        if url_input and url_input.value:
+            font_url = url_input.value.strip()
+            if font_url:
+                debug_log(f"Using font URL: {font_url}")
+                
+                async def process_url():
+                    try:
+                        font_data = await self.fetch_font_from_url(font_url)
+                        if font_data:
+                            self.state["file_data"] = font_data
+                            self.process_font()
+                    finally:
+                        if not self.state["info"]:  # If processing didn't succeed
+                            self.state["is_processing"] = False
+                
+                # Run the async function
+                import asyncio
+                asyncio.ensure_future(process_url())
+                return
+        
+        # If we got here, neither file nor valid URL is available
+        debug_log("No file or URL provided")
+        self.state["error"] = "Please select a font file or provide a valid URL."
+        self.state["is_processing"] = False
+        
+    def on_url_change(self, event):
+        debug_log(f"URL changed: {event.target.value}")
+        self.state["font_url"] = event.target.value
+    
+    def on_reset_click(self, event):
+        debug_log("Reset clicked")
+        self.state["info"] = ""
+        self.state["error"] = ""
+        self.state["file_data"] = None
+        self.state["is_processing"] = False
+        self.state["font_loaded"] = False
+        self.state["font_name"] = ""
+        self.state["detailed_info"] = {}
+        
+        # Reset file input
+        upload = document.getElementById("font-upload")
+        if upload:
+            upload.value = ""
+            
+        # Reset URL to default
+        url_input = document.getElementById("font-url")
+        if url_input:
+            url_input.value = "https://github.com/google/fonts/raw/refs/heads/main/ofl/abrilfatface/AbrilFatface-Regular.ttf"
+            self.state["font_url"] = url_input.value
+            
+        # Remove font-face style if it exists
+        self.remove_font_face()
+
+    def remove_font_face(self):
+        # Remove any existing font-face style
+        style_element = document.getElementById("font-face-style")
+        if style_element:
+            style_element.remove()
+            debug_log("Removed font-face style")
+
+    def add_font_face(self, font_data, font_name):
+        # First remove any existing font-face
+        self.remove_font_face()
+        
+        # Create a blob URL for the font data
+        blob = window.Blob.new([font_data], {"type": "font/ttf"})
+        font_url = window.URL.createObjectURL(blob)
+        
+        # Create a style element for the font-face
+        style_element = document.createElement("style")
+        style_element.id = "font-face-style"
+        style_element.textContent = f"""
+        @font-face {{
+            font-family: 'PreviewFont';
+            src: url('{font_url}') format('truetype');
+            font-weight: normal;
+            font-style: normal;
+        }}
+        #preview-text {{
+            font-family: 'PreviewFont', sans-serif;
+        }}
+        """
+        
+        # Add the style element to the document head
+        document.head.appendChild(style_element)
+        debug_log(f"Added font-face for {font_name}")
+
+    def process_font(self):
+        debug_log("Processing font data")
+        try:
+            # Process font data
+            font_data = io.BytesIO(self.state["file_data"])
+            font = TTFont(font_data)
+            debug_log("Font loaded successfully")
+            
+            # Extract name table
+            names = font["name"]
+            
+            # Helper to get name 
+            def get_name(nameID):
+                entry = names.getName(nameID, 3, 1, 0x409) or names.getName(nameID, 1, 0, 0)
+                return entry.toStr() if entry else "(N/A)"
+            
+            # Get font name for display
+            family_name = get_name(1)
+            subfamily = get_name(2)
+            self.state["font_name"] = f"{family_name} {subfamily}".strip()
+            
+            # Basic font info
+            info = [
+                f"Family Name: {family_name}",
+                f"Subfamily: {subfamily}",
+                f"Full Name: {get_name(4)}",
+                f"Version: {get_name(5)}",
+                f"PostScript Name: {get_name(6)}",
+                f"Units Per Em: {font['head'].unitsPerEm}",
+                f"Created: {font['head'].created}",
+                f"Modified: {font['head'].modified}",
+                f"Tables: {', '.join(sorted(font.keys()))}",
+                f"Number of Glyphs: {len(font.getGlyphOrder())}",
+            ]
+            
+            # Detailed info for tabs
+            detailed_info = {
+                "tables": {},
+                "features": {}
+            }
+            
+            # Get table info
+            for tag in sorted(font.keys()):
+                table = font[tag]
+                if hasattr(table, "__dict__"):
+                    attrs = [attr for attr in dir(table) if not attr.startswith("_") and not callable(getattr(table, attr))]
+                    if attrs:
+                        description = ", ".join([f"{attr}: {getattr(table, attr)}" for attr in attrs[:5]])
+                        detailed_info["tables"][tag] = description
+                    else:
+                        detailed_info["tables"][tag] = "Table present but no readable attributes"
+                else:
+                    detailed_info["tables"][tag] = "Table present"
+            
+            # Get OpenType features if available
+            if "GSUB" in font:
+                try:
+                    gsub = font["GSUB"].table
+                    features = {}
+                    for feature in gsub.FeatureList.FeatureRecord:
+                        tag = feature.FeatureTag
+                        features[tag] = "OpenType feature present"
+                    detailed_info["features"]["GSUB"] = features
+                except Exception as e:
+                    debug_log(f"Error extracting GSUB features: {str(e)}")
+            
+            if "GPOS" in font:
+                try:
+                    gpos = font["GPOS"].table
+                    features = {}
+                    for feature in gpos.FeatureList.FeatureRecord:
+                        tag = feature.FeatureTag
+                        features[tag] = "OpenType feature present"
+                    detailed_info["features"]["GPOS"] = features
+                except Exception as e:
+                    debug_log(f"Error extracting GPOS features: {str(e)}")
+            
+            # Update state with info
+            self.state["info"] = "\n".join(info)
+            self.state["detailed_info"] = detailed_info
+            self.state["error"] = ""
+            self.state["font_loaded"] = True
+            debug_log("Font info extracted")
+            
+            # Add font-face for preview
+            self.add_font_face(self.state["file_data"], self.state["font_name"])
+            
+        except Exception as e:
+            error_msg = f"Error processing font: {str(e)}"
+            debug_log(error_msg)
+            debug_log(traceback.format_exc())
+            self.state["error"] = error_msg
+            self.state["font_loaded"] = False
+        finally:
+            self.state["is_processing"] = False
+
+app.mount("#app")
+debug_log("App mounted")
+</script>
+
+<!-- JavaScript for UI interactions -->
+<script>
+document.addEventListener('DOMContentLoaded', () => {
+  // Navbar burger menu
+  const $navbarBurgers = Array.prototype.slice.call(document.querySelectorAll('.navbar-burger'), 0);
+  if ($navbarBurgers.length > 0) {
+    $navbarBurgers.forEach(el => {
+      el.addEventListener('click', () => {
+        const target = el.dataset.target;
+        const $target = document.getElementById(target);
+        el.classList.toggle('is-active');
+        $target.classList.toggle('is-active');
+      });
+    });
+  }
+
+  // Functions to open and close a modal
+  function openModal($el) {
+    $el.classList.add('is-active');
+  }
+
+  function closeModal($el) {
+    $el.classList.remove('is-active');
+  }
+
+  function closeAllModals() {
+    (document.querySelectorAll('.modal') || []).forEach(($modal) => {
+      closeModal($modal);
+    });
+  }
+
+  // Add a click event on buttons to open a specific modal
+  (document.querySelectorAll('.js-modal-trigger') || []).forEach(($trigger) => {
+    const modal = $trigger.dataset.target;
+    const $target = document.getElementById(modal);
+
+    $trigger.addEventListener('click', () => {
+      openModal($target);
+    });
+  });
+
+  // Add a click event on various child elements to close the parent modal
+  (document.querySelectorAll('.modal-background, .modal-close, .modal-card-head .delete, .modal-card-foot .button') || []).forEach(($close) => {
+    const $target = $close.closest('.modal');
+
+    $close.addEventListener('click', () => {
+      closeModal($target);
+    });
+  });
+
+  // Add a keyboard event to close all modals
+  document.addEventListener('keydown', (event) => {
+    const e = event || window.event;
+
+    if (e.keyCode === 27) { // Escape key
+      closeAllModals();
+    }
+  });
+});
+</script>
+</body>
+</html> 
