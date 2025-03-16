@@ -512,21 +512,34 @@ class FontInspector(Page):
                         t.i(class_="fas fa-link")
                 t.p("If both file and URL are provided, the file will be used.", class_="help")
             
-            # Process button with loading animation
+            # Preset fonts list for quick testing
             with t.div(class_="field mt-4"):
-                with t.div(class_="is-flex is-justify-content-center">
-                    with t.div(class_="control">
-                        button_text = "Processing..." if self.state["is_processing"] else "Process Font"
-                        button_class = "button is-primary is-medium is-loading" if self.state["is_processing"] else "button is-primary is-medium"
-                        t.button(
-                            t.span(class_="icon mr-1"),
-                            t.i(class_="fas fa-cog"),
-                            t.span(button_text),
-                            class_=button_class,
-                            on_click=self.on_process_click,
-                            disabled=self.state["is_processing"],
-                            id="process-button"
-                        )
+                t.label("Or try a preset font:", class_="label")
+                with t.div(class_="control"):
+                    with t.div(class_="select is-fullwidth"):
+                        with t.select(id="preset-font", on_change="presetFontChanged(event)"):
+                            t.option("Select a preset font...", value="", selected="selected")
+                            t.option("Abril Fatface (Serif Display)", value="https://github.com/google/fonts/raw/main/ofl/abrilfatface/AbrilFatface-Regular.ttf")
+                            t.option("Roboto (Sans-Serif)", value="https://github.com/google/fonts/raw/main/apache/roboto/Roboto-Regular.ttf")
+                            t.option("Open Sans (Sans-Serif)", value="https://github.com/google/fonts/raw/main/ofl/opensans/OpenSans-Regular.ttf")
+                            t.option("Source Code Pro (Monospace)", value="https://github.com/google/fonts/raw/main/ofl/sourcecodepro/SourceCodePro-Regular.ttf")
+                            t.option("Lora (Serif)", value="https://github.com/google/fonts/raw/main/ofl/lora/Lora-Regular.ttf")
+                            t.option("Montserrat (Sans-Serif)", value="https://github.com/google/fonts/raw/main/ofl/montserrat/Montserrat-Regular.ttf")
+            
+            # Add script to handle preset font selection
+            t.script("""
+            function presetFontChanged(event) {
+                const fontUrl = event.target.value;
+                if (fontUrl) {
+                    document.getElementById('font-url').value = fontUrl;
+                    // Trigger processing
+                    const processButton = document.getElementById('process-button');
+                    if (processButton) {
+                        processButton.click();
+                    }
+                }
+            }
+            """)
                         
             # Loading animation overlay (hidden by default)
             with t.div(id="loading-overlay", class_="modal", style="display: none;"):
