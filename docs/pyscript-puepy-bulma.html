@@ -797,6 +797,57 @@ class FontInspector(Page):
                         else:
                             t.p("No feature information available.")
                 
+                # Sharing options
+                with t.div(class_="field mt-4 mb-2"):
+                    t.h5("Share This Font", class_="has-text-weight-bold mb-2")
+                    with t.div(class_="buttons"):
+                        with t.button(
+                            class_="button is-small is-info",
+                            on_click="copyShareLink()",
+                            id="share-button"
+                        ):
+                            with t.span(class_="icon is-small"):
+                                t.i(class_="fas fa-link")
+                            t.span("Copy Link")
+                        with t.button(
+                            class_="button is-small is-twitter",
+                            style="background-color: #1DA1F2; color: white;",
+                            on_click="shareOnTwitter()",
+                        ):
+                            with t.span(class_="icon is-small"):
+                                t.i(class_="fab fa-twitter")
+                            t.span("Twitter")
+                
+                # Share script
+                t.script("""
+                function copyShareLink() {
+                    const fontUrl = document.getElementById('font-url').value;
+                    if (fontUrl) {
+                        const shareUrl = window.location.href.split('?')[0] + '?font=' + encodeURIComponent(fontUrl);
+                        navigator.clipboard.writeText(shareUrl).then(() => {
+                            // Change button text temporarily
+                            const shareButton = document.getElementById('share-button');
+                            const originalContent = shareButton.innerHTML;
+                            shareButton.innerHTML = '<span class="icon is-small"><i class="fas fa-check"></i></span><span>Copied!</span>';
+                            setTimeout(() => {
+                                shareButton.innerHTML = originalContent;
+                            }, 2000);
+                        });
+                    }
+                }
+                
+                function shareOnTwitter() {
+                    const fontUrl = document.getElementById('font-url').value;
+                    const fontName = document.querySelector('.title.is-5').textContent.replace('Font Preview: ', '');
+                    if (fontUrl) {
+                        const shareUrl = window.location.href.split('?')[0] + '?font=' + encodeURIComponent(fontUrl);
+                        const tweetText = encodeURIComponent(`Check out this font: ${fontName} on the Boabro Font Inspector Tool`);
+                        window.open(`https://twitter.com/intent/tweet?text=${tweetText}&url=${encodeURIComponent(shareUrl)}`, 
+                                    '_blank');
+                    }
+                }
+                """)
+                
                 # Reset button
                 with t.div(class_="field mt-3"):
                     t.button("Reset", class_="button is-light", on_click=self.on_reset_click)
