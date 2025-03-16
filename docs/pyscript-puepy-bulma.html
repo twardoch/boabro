@@ -1060,6 +1060,12 @@ class FontInspector(Page):
             font = TTFont(font_data)
             debug_log("Font loaded successfully")
             
+            # Update loading message
+            try:
+                window.showLoading("Extracting font metadata...")
+            except:
+                pass
+            
             # Extract name table
             names = font["name"]
             
@@ -1087,6 +1093,12 @@ class FontInspector(Page):
                 f"Number of Glyphs: {len(font.getGlyphOrder())}",
             ]
             
+            # Try to update loading message
+            try:
+                window.showLoading("Analyzing font tables and features...")
+            except:
+                pass
+                
             # Detailed info for tabs
             detailed_info = {
                 "tables": {},
@@ -1136,15 +1148,33 @@ class FontInspector(Page):
             self.state["font_loaded"] = True
             debug_log("Font info extracted")
             
+            # Try to update loading message
+            try:
+                window.showLoading("Preparing font preview...")
+            except:
+                pass
+                
             # Add font-face for preview
             self.add_font_face(self.state["file_data"], self.state["font_name"])
             
+            # Hide loading animation
+            try:
+                window.hideLoading()
+            except:
+                pass
+                
         except Exception as e:
             error_msg = f"Error processing font: {str(e)}"
             debug_log(error_msg)
             debug_log(traceback.format_exc())
             self.state["error"] = error_msg
             self.state["font_loaded"] = False
+            
+            # Hide loading animation
+            try:
+                window.hideLoading()
+            except:
+                pass
         finally:
             self.state["is_processing"] = False
 
