@@ -532,7 +532,22 @@ class FontInspector(Page):
                         with t.p(class_="is-size-7 mt-2 has-text-grey">
                             t.text("This may take a moment depending on the font size and complexity")
                             
-            # Add script to show/hide loading overlay
+            # Error modal for better error visibility
+            with t.div(id="error-modal", class_="modal"):
+                with t.div(class_="modal-background"):
+                    t.text("")
+                with t.div(class_="modal-card">
+                    with t.header(class_="modal-card-head has-background-danger-dark"):
+                        t.p("Error", class_="modal-card-title has-text-white")
+                        with t.button(class_="delete", aria_label="close", on_click="closeErrorModal()"):
+                            t.text("")
+                    with t.section(class_="modal-card-body">
+                        t.p(id="error-message", class_="has-text-danger")
+                    with t.footer(class_="modal-card-foot">
+                        with t.div(class_="buttons is-centered w-100">
+                            t.button("OK", class_="button is-danger", on_click="closeErrorModal()")
+            
+            # Add script to show/hide loading overlay and error modal
             t.script("""
             function showLoading(message) {
                 const loadingOverlay = document.getElementById('loading-overlay');
@@ -547,6 +562,22 @@ class FontInspector(Page):
                 const loadingOverlay = document.getElementById('loading-overlay');
                 if (loadingOverlay) {
                     loadingOverlay.style.display = 'none';
+                }
+            }
+            
+            function showErrorModal(message) {
+                const errorModal = document.getElementById('error-modal');
+                const errorMessage = document.getElementById('error-message');
+                if (errorModal && errorMessage) {
+                    errorMessage.textContent = message || 'An error occurred.';
+                    errorModal.classList.add('is-active');
+                }
+            }
+            
+            function closeErrorModal() {
+                const errorModal = document.getElementById('error-modal');
+                if (errorModal) {
+                    errorModal.classList.remove('is-active');
                 }
             }
             """)
