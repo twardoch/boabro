@@ -948,13 +948,23 @@ class FontInspector(Page):
                 debug_log(f"Direct request failed: {str(direct_error)}")
             
             # If we got here, all attempts failed
-            self.state["error"] = f"Failed to fetch font. CORS policy may be blocking the request. Try downloading the font and uploading it directly."
+            error_msg = f"Failed to fetch font. CORS policy may be blocking the request. Try downloading the font and uploading it directly."
+            self.state["error"] = error_msg
+            try:
+                window.showErrorModal(error_msg)
+            except:
+                pass
             return None
                 
         except Exception as e:
-            debug_log(f"Error fetching font: {str(e)}")
+            error_msg = f"Error fetching font: {str(e)}. Try downloading the font and uploading it directly."
+            debug_log(error_msg)
             debug_log(traceback.format_exc())
-            self.state["error"] = f"Error fetching font: {str(e)}. Try downloading the font and uploading it directly."
+            self.state["error"] = error_msg
+            try:
+                window.showErrorModal(error_msg)
+            except:
+                pass
             return None
             
     def on_process_click(self, event):
