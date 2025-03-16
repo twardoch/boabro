@@ -929,6 +929,13 @@ class FontInspector(Page):
     def on_process_click(self, event):
         debug_log("Process button clicked")
         self.state["is_processing"] = True
+        self.state["error"] = ""  # Clear previous errors
+        
+        # Try to show loading animation
+        try:
+            window.showLoading("Preparing to process font...")
+        except Exception as loading_error:
+            debug_log(f"Error showing loading animation: {str(loading_error)}")
         
         # Get file directly from the input element
         upload = document.getElementById("font-upload")
@@ -939,7 +946,14 @@ class FontInspector(Page):
             async def process_file():
                 try:
                     file = upload.files.item(0)
-                    debug_log(f"Processing file: {file.name}")
+                    file_name = file.name if hasattr(file, 'name') else "uploaded file"
+                    debug_log(f"Processing file: {file_name}")
+                    
+                    # Update loading message
+                    try:
+                        window.showLoading(f"Reading file: {file_name}...")
+                    except:
+                        pass
                     
                     # Read file data
                     array_buffer = await file.arrayBuffer()
@@ -949,6 +963,12 @@ class FontInspector(Page):
                     # Store data for processing
                     self.state["file_data"] = data
                     
+                    # Update loading message
+                    try:
+                        window.showLoading(f"Analyzing font: {file_name}...")
+                    except:
+                        pass
+                    
                     # Process immediately
                     self.process_font()
                     
@@ -957,6 +977,10 @@ class FontInspector(Page):
                     debug_log(traceback.format_exc())
                     self.state["error"] = f"Error accessing file: {str(e)}"
                     self.state["is_processing"] = False
+                    try:
+                        window.hideLoading()
+                    except:
+                        pass
             
             # Run the async function
             import asyncio
@@ -972,10 +996,33 @@ class FontInspector(Page):
                 
                 async def process_url():
                     try:
+                        # Update loading message
+                        try:
+                            window.showLoading(f"Fetching font from URL: {font_url}...")
+                        except:
+                            pass
+                        
                         font_data = await self.fetch_font_from_url(font_url)
                         if font_data:
+                            try:
+                                window.showLoading("Analyzing font from URL...")
+                            except:
+                                pass
                             self.state["file_data"] = font_data
                             self.process_font()
+                        else:
+                            try:
+                                window.hideLoading()
+                            except:
+                                pass
+                    except Exception as e:
+                        debug_log(f"Error fetching URL: {str(e)}")
+                        self.state["error"] = f"Error fetching URL: {str(e)}"
+                        self.state["is_processing"] = False
+                        try:
+                            window.hideLoading()
+                        except:
+                            pass
                     finally:
                         if not self.state["info"]:  # If processing didn't succeed
                             self.state["is_processing"] = False
@@ -989,6 +1036,10 @@ class FontInspector(Page):
         debug_log("No file or URL provided")
         self.state["error"] = "Please select a font file or provide a valid URL."
         self.state["is_processing"] = False
+        try:
+            window.hideLoading()
+        except:
+            pass
         
     def on_url_change(self, event):
         debug_log(f"URL changed: {event.target.value}")
