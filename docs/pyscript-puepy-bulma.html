@@ -512,6 +512,22 @@ class FontInspector(Page):
                         t.i(class_="fas fa-link")
                 t.p("If both file and URL are provided, the file will be used.", class_="help")
             
+            # Process button with loading animation
+            with t.div(class_="field mt-4"):
+                with t.div(class_="is-flex is-justify-content-center"):
+                    with t.div(class_="control"):
+                        button_text = "Processing..." if self.state["is_processing"] else "Process Font"
+                        button_class = "button is-primary is-medium is-loading" if self.state["is_processing"] else "button is-primary is-medium"
+                        t.button(
+                            t.span(class_="icon mr-1"),
+                            t.i(class_="fas fa-cog"),
+                            t.span(button_text),
+                            class_=button_class,
+                            on_click=self.on_process_click,
+                            disabled=self.state["is_processing"],
+                            id="process-button"
+                        )
+            
             # Preset fonts list for quick testing
             with t.div(class_="field mt-4"):
                 t.label("Or try a preset font:", class_="label")
