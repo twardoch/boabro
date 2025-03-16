@@ -1257,11 +1257,12 @@ class FontInspector(Page):
             self.state["error"] = error_msg
             self.state["font_loaded"] = False
             
-            # Hide loading animation
+            # Hide loading animation and show error
             try:
                 window.hideLoading()
-            except:
-                pass
+                window.showErrorModal(error_msg)
+            except Exception as modal_error:
+                debug_log(f"Error showing error modal: {str(modal_error)}")
         finally:
             self.state["is_processing"] = False
 
