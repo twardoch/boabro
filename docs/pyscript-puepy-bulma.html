@@ -1010,8 +1010,10 @@ class FontInspector(Page):
                     self.state["is_processing"] = False
                     try:
                         window.hideLoading()
-                    except:
-                        pass
+                        # Show error in modal
+                        window.showErrorModal(f"Error accessing file: {str(e)}")
+                    except Exception as modal_error:
+                        debug_log(f"Error showing error modal: {str(modal_error)}")
             
             # Run the async function
             import asyncio
@@ -1044,6 +1046,7 @@ class FontInspector(Page):
                         else:
                             try:
                                 window.hideLoading()
+                                window.showErrorModal("Failed to fetch font from URL. CORS policy may be blocking the request.")
                             except:
                                 pass
                     except Exception as e:
@@ -1052,6 +1055,7 @@ class FontInspector(Page):
                         self.state["is_processing"] = False
                         try:
                             window.hideLoading()
+                            window.showErrorModal(f"Error fetching URL: {str(e)}")
                         except:
                             pass
                     finally:
@@ -1069,6 +1073,7 @@ class FontInspector(Page):
         self.state["is_processing"] = False
         try:
             window.hideLoading()
+            window.showErrorModal("Please select a font file or provide a valid URL.")
         except:
             pass
         
