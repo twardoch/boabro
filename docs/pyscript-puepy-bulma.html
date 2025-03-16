@@ -921,6 +921,34 @@ class FontInspector(Page):
         
         # Run the attach handler
         attach_handler()
+        
+        # Check for font URL parameter in the URL (for shared fonts)
+        try:
+            url_params = window.location.search
+            debug_log(f"URL parameters: {url_params}")
+            
+            if url_params:
+                # Simple parsing for the 'font' parameter
+                import urllib.parse
+                params = urllib.parse.parse_qs(url_params.lstrip('?'))
+                debug_log(f"Parsed parameters: {params}")
+                
+                if 'font' in params and params['font']:
+                    shared_font_url = params['font'][0]
+                    debug_log(f"Found shared font URL: {shared_font_url}")
+                    
+                    # Update the URL input field
+                    url_input = document.getElementById("font-url")
+                    if url_input:
+                        url_input.value = shared_font_url
+                        self.state["font_url"] = shared_font_url
+                        
+                        # Process the shared font automatically
+                        debug_log("Processing shared font automatically")
+                        self.on_process_click(None)
+        except Exception as e:
+            debug_log(f"Error processing URL parameters: {str(e)}")
+            debug_log(traceback.format_exc())
 
     def set_active_tab(self, tab_name):
         debug_log(f"Setting active tab to: {tab_name}")
