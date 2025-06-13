@@ -1,0 +1,194 @@
+<!DOCTYPE html>
+<html>
+<head>
+<title>Font Analyzer - Stlite</title>
+<script src="https://cdn.jsdelivr.net/npm/@stlite/mountable@0.75.0/build/stlite.min.js"></script>
+<link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/@stlite/mountable@0.75.0/build/stlite.min.css">
+<style>
+body {
+font-family: Arial, sans-serif;
+margin: 0;
+padding: 0;
+height: 100vh;
+width: 100vw;
+}
+#stlite-container {
+height: 100%;
+width: 100%;
+}
+</style>
+</head>
+<body>
+<div id="stlite-container"></div>
+<script type="py"> 
+import streamlit as st
+import io
+import requests
+from fontTools.ttLib import TTFont
+
+def display_font_info(font):
+    # Get UPM value
+    upm = font['head'].unitsPerEm
+    
+    # Get name table entries
+    name_table = font['name']
+    
+    # Display basic information
+    st.subheader("Basic Information")
+    
+    # Helper to get name
+    def get_name(nameID):
+        entry = name_table.getName(nameID, 3, 1, 0x409) or name_table.getName(nameID, 1, 0, 0)
+        return entry.toUnicode() if entry else "(N/A)"
+    
+    # Display family name, style, etc.
+    col1, col2 = st.columns(2)
+    with col1:
+        st.metric("Family Name", get_name(1))
+        st.metric("Full Name", get_name(4))
+    with col2:
+        st.metric("Units Per Em (UPM)", upm)
+        st.metric("Number of Glyphs", len(font.getGlyphOrder()))
+    
+    # Display available tables
+    st.subheader("Available Tables")
+    st.write(", ".join(sorted(font.keys())))
+    
+    # Display name table entries
+    st.subheader("Name Table Entries")
+    
+    # Create a list to store the data
+    name_data = []
+    
+    for record in name_table.names:
+        try:
+            name_id = record.nameID
+            platform_id = record.platformID
+            string = record.toUnicode()
+            name_data.append({"Name ID": name_id, "Platform ID": platform_id, "String": string})
+        except:
+            name_data.append({"Name ID": record.nameID, "Platform ID": record.platformID, "String": "(could not decode)"})
+    
+    # Display as a table
+    st.table(name_data)
+
+st.title("Font Analyzer - Stlite")
+st.write("Upload a TTF or OTF font file or provide a URL to analyze it.")
+
+tab1, tab2 = st.tabs(["Upload Font", "Font URL"])
+
+with tab1:
+    uploaded_file = st.file_uploader("Choose a font file", type=["ttf", "otf"])
+    
+    if uploaded_file is not None:
+        st.write("Analyzing uploaded font...")
+        
+        try:
+            # Read the file
+            font_data = uploaded_file.getvalue()
+            
+            # Analyze the font
+            font_io = io.BytesIO(font_data)
+            font = TTFont(font_io)
+            
+            # Display font information
+            display_font_info(font)
+            
+        except Exception as e:
+            st.error(f"Error analyzing font: {str(e)}")
+
+with tab2:
+    default_url = "https://github.com/google/fonts/raw/refs/heads/main/ofl/abrilfatface/AbrilFatface-Regular.ttf"
+    font_url = st.text_input("Enter font URL", value=default_url)
+    
+    if st.button("Analyze Font from URL"):
+        if font_url:
+            with st.spinner("Fetching and analyzing font from URL..."):
+                
+                try:
+                    # Add headers to avoid CORS issues
+                    headers = {
+                        "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/91.0.4472.124 Safari/537.36",
+                        "Accept": "*/*",
+                        "Accept-Language": "en-US,en;q=0.9"
+                    }
+                    
+                    # List of CORS proxies to try
+                    cors_proxies = [
+                        "https://corsproxy.io/?url=",
+                        "https://api.allorigins.win/raw?url=",
+                        "https://cors.eu.org/",
+                        "https://xofix.4kb.dev/?url="
+                    ]
+
+                    font_data = None
+                    
+                    # If it's a GitHub URL, try to use a more direct approach first
+                    if "github.com" in font_url:
+                        # Try to convert to raw.githubusercontent.com if not already
+                        if "raw.githubusercontent.com" not in font_url:
+                            # Convert github.com URL to raw.githubusercontent.com
+                            raw_url = font_url.replace("github.com", "raw.githubusercontent.com")
+                            raw_url = raw_url.replace("/blob/", "/")
+                            try:
+                                response = requests.get(raw_url, headers=headers)
+                                if response.status_code == 200:
+                                    font_data = response.content
+                            except Exception:
+                                pass
+                    
+                    # If we couldn't get the font data from the raw URL, try proxies
+                    if not font_data:
+                        # Try each CORS proxy in sequence
+                        for proxy in cors_proxies:
+                            if font_data:
+                                break
+                            proxy_url = f"{proxy}{font_url}"
+                            try:
+                                response = requests.get(proxy_url, headers=headers)
+                                if response.status_code == 200:
+                                    font_data = response.content
+                            except Exception:
+                                continue
+                    
+                    # Try direct URL as fallback
+                    if not font_data:
+                        try:
+                            response = requests.get(font_url, headers=headers)
+                            if response.status_code == 200:
+                                font_data = response.content
+                        except Exception:
+                            pass
+                    
+                    # If we have font data, analyze it
+                    if font_data:
+                        # Analyze the font
+                        font_io = io.BytesIO(font_data)
+                        font = TTFont(font_io)
+                        
+                        # Display font information
+                        display_font_info(font)
+                    else:
+                        st.error("Failed to fetch font from URL. Try downloading the font and uploading it directly.")
+                        
+                except Exception as e:
+                    st.error(f"Error fetching or analyzing font: {str(e)}")
+            
+        else:
+            st.warning("Please enter a URL")
+</script>
+
+<script type="text/javascript">
+stlite.mount(
+{
+  requirements: ['fonttools', 'requests'],
+  entrypoint: 'app.py',
+  files: {
+    'app.py': document.querySelector('script[type="py"]').textContent,
+  },
+},
+document.getElementById('stlite-container')
+);
+</script>
+</body>
+</html>

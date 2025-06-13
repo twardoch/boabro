@@ -1,0 +1,267 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Font Inspector with Web Worker</title>
+  <link href="https://cdn.jsdelivr.net/npm/bootstrap@5.3.2/dist/css/bootstrap.min.css" rel="stylesheet">
+  <style>
+    .card {
+      margin-bottom: 20px;
+    }
+    #output {
+      white-space: pre-wrap;
+      background-color: #f8f9fa;
+      padding: 15px;
+      border-radius: 4px;
+      margin-top: 15px;
+      font-family: monospace;
+      max-height: 500px;
+      overflow-y: auto;
+    }
+    .debug-info {
+      background-color: #f8f9fa;
+      border: 1px solid #dee2e6;
+      border-radius: 0.25rem;
+      padding: 1rem;
+      margin-top: 1rem;
+      font-family: monospace;
+      font-size: 0.875rem;
+      max-height: 200px;
+      overflow-y: auto;
+    }
+    .spinner-border {
+      display: inline-block;
+      width: 1rem;
+      height: 1rem;
+      margin-right: 0.5rem;
+      vertical-align: text-bottom;
+      border: 0.2em solid currentColor;
+      border-right-color: transparent;
+      border-radius: 50%;
+      animation: spinner-border .75s linear infinite;
+    }
+    @keyframes spinner-border {
+      to { transform: rotate(360deg); }
+    }
+  </style>
+</head>
+<body>
+  <div class="container py-4">
+    <h1 class="mb-4">Font Inspector with Web Worker</h1>
+    
+    <div class="card">
+      <div class="card-body">
+        <h5 class="card-title">Upload Font</h5>
+        <p class="card-text">Select a TTF or OTF font file to analyze, or provide a URL.</p>
+        
+        <div class="mb-3">
+          <label for="font-file" class="form-label">Font File:</label>
+          <input type="file" class="form-control" id="font-file" accept=".ttf,.otf">
+          <div id="file-name" class="form-text"></div>
+        </div>
+        
+        <div class="mb-3">
+          <label for="font-url" class="form-label">Font URL:</label>
+          <input type="url" 
+                 class="form-control" 
+                 id="font-url" 
+                 placeholder="https://example.com/font.ttf" 
+                 value="https://github.com/google/fonts/raw/refs/heads/main/ofl/abrilfatface/AbrilFatface-Regular.ttf">
+          <div class="form-text">If both file and URL are provided, the file will be used.</div>
+        </div>
+        
+        <button id="analyze-btn" class="btn btn-primary" disabled>
+          <span id="spinner" class="spinner-border" style="display: none;"></span>
+          Analyze Font
+        </button>
+      </div>
+    </div>
+    
+    <div id="status" class="alert alert-info">Loading Pyodide...</div>
+    
+    <div id="result-container"></div>
+    
+    <!-- Debug information section (hidden by default) -->
+    <div id="debug-container" class="mt-4" style="display: none;">
+      <div class="card">
+        <div class="card-header d-flex justify-content-between align-items-center">
+          <h5 class="mb-0">Debug Information</h5>
+          <button class="btn btn-sm btn-outline-secondary" onclick="toggleDebug()">Hide</button>
+        </div>
+        <div class="card-body">
+          <div id="debug-info" class="debug-info"></div>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <script>
+    // Create a worker
+    const worker = new Worker('pyodide-worker.js');
+    const analyzeButton = document.getElementById('analyze-btn');
+    const statusElement = document.getElementById('status');
+    const resultContainer = document.getElementById('result-container');
+    const fileInput = document.getElementById('font-file');
+    const urlInput = document.getElementById('font-url');
+    const spinner = document.getElementById('spinner');
+    const debugInfo = document.getElementById('debug-info');
+    
+    // Debug functions
+    function showDebug() {
+      document.getElementById('debug-container').style.display = 'block';
+    }
+    
+    function toggleDebug() {
+      const debugContainer = document.getElementById('debug-container');
+      debugContainer.style.display = debugContainer.style.display === 'none' ? 'block' : 'none';
+    }
+    
+    function logToDebug(message) {
+      console.log(message);
+      if (debugInfo) {
+        debugInfo.innerHTML += `<div>[JS] ${message}</div>`;
+        debugInfo.scrollTop = debugInfo.scrollHeight;
+      }
+    }
+    
+    // Handle messages from the worker
+    worker.onmessage = (event) => {
+      const { type, data } = event.data;
+      
+      if (type === 'ready') {
+        statusElement.textContent = 'Python is ready!';
+        statusElement.className = 'alert alert-success';
+        analyzeButton.disabled = false;
+        logToDebug('Pyodide is ready');
+      } 
+      else if (type === 'output') {
+        // Format the output as HTML
+        const formattedOutput = formatOutput(data);
+        resultContainer.innerHTML = `
+          <div class="card">
+            <div class="card-header">
+              <h5 class="mb-0">Analysis Results</h5>
+            </div>
+            <div class="card-body">
+              <div id="output">${formattedOutput}</div>
+            </div>
+          </div>
+        `;
+        analyzeButton.disabled = false;
+        spinner.style.display = 'none';
+        logToDebug('Analysis completed');
+      } 
+      else if (type === 'error') {
+        resultContainer.innerHTML = `
+          <div class="alert alert-danger">
+            <h5 class="alert-heading">Error!</h5>
+            <p>${data}</p>
+            <hr>
+            <p class="mb-0">Check the debug information for more details.</p>
+            <button class="btn btn-sm btn-outline-danger mt-2" onclick="showDebug()">Show Debug Info</button>
+          </div>
+        `;
+        analyzeButton.disabled = false;
+        spinner.style.display = 'none';
+        logToDebug(`Error: ${data}`);
+        showDebug();
+      }
+      else if (type === 'log') {
+        logToDebug(`[Worker] ${data}`);
+      }
+    };
+    
+    // Format the output with some HTML styling
+    function formatOutput(text) {
+      if (!text) return '';
+      
+      // Escape HTML
+      const escaped = text
+        .replace(/&/g, '&amp;')
+        .replace(/</g, '&lt;')
+        .replace(/>/g, '&gt;');
+      
+      // Add some basic formatting
+      return escaped
+        .replace(/^Font Information:/m, '<h5>Font Information:</h5>')
+        .replace(/^Available Tables:/m, '<h5>Available Tables:</h5>')
+        .replace(/^Name Table Entries:/m, '<h5>Name Table Entries:</h5>')
+        .replace(/^Error/m, '<span class="text-danger">Error</span>')
+        .replace(/^Traceback/m, '<span class="text-danger">Traceback</span>')
+        .replace(/\n/g, '<br>');
+    }
+    
+    // Handle file input change
+    fileInput.addEventListener('change', (event) => {
+      const fileNameEl = document.getElementById('file-name');
+      if (event.target.files.length > 0) {
+        fileNameEl.textContent = `Selected file: ${event.target.files[0].name}`;
+        logToDebug(`File selected: ${event.target.files[0].name}`);
+      } else {
+        fileNameEl.textContent = '';
+      }
+    });
+    
+    // Analyze Font button handler
+    analyzeButton.addEventListener('click', async () => {
+      if (!fileInput.files.length && !urlInput.value) {
+        resultContainer.innerHTML = `
+          <div class="alert alert-warning">
+            Please provide either a file or URL.
+          </div>
+        `;
+        return;
+      }
+      
+      analyzeButton.disabled = true;
+      spinner.style.display = 'inline-block';
+      resultContainer.innerHTML = `
+        <div class="alert alert-info">
+          Analyzing font... Please wait.
+        </div>
+      `;
+      
+      try {
+        if (fileInput.files.length > 0) {
+          // Process file
+          const file = fileInput.files[0];
+          logToDebug(`Processing file: ${file.name} (${file.size} bytes)`);
+          const arrayBuffer = await file.arrayBuffer();
+          worker.postMessage({
+            type: 'analyze_font_file',
+            data: arrayBuffer
+          });
+        } else if (urlInput.value) {
+          // Process URL
+          const url = urlInput.value.trim();
+          logToDebug(`Processing URL: ${url}`);
+          worker.postMessage({
+            type: 'analyze_font_url',
+            url: url
+          });
+        }
+      } catch (error) {
+        resultContainer.innerHTML = `
+          <div class="alert alert-danger">
+            <h5 class="alert-heading">Error!</h5>
+            <p>${error.message || 'Unknown error occurred'}</p>
+            <hr>
+            <p class="mb-0">Check the debug information for more details.</p>
+            <button class="btn btn-sm btn-outline-danger mt-2" onclick="showDebug()">Show Debug Info</button>
+          </div>
+        `;
+        analyzeButton.disabled = false;
+        spinner.style.display = 'none';
+        logToDebug(`Error: ${error.message}`);
+        showDebug();
+      }
+    });
+    
+    // Initialize
+    document.addEventListener('DOMContentLoaded', function() {
+      logToDebug("DOM loaded, worker initialized");
+    });
+  </script>
+</body>
+</html>

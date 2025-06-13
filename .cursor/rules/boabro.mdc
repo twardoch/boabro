@@ -1,0 +1,29 @@
+---
+description: boabro project rules
+globs: 
+alwaysApply: false
+---
+# `boabro`
+
+This repo (local copy of `https://github.com/twardoch/boabro/`) contains a `docs` folder that contains various approaches to use Python in the browser with some HTML UI solutions. 
+
+Each page is supposed to be a small tool runnable in a browser. The tool is supposed to let the user upload a font file and the print some info about it. For this, it uses the `fonttools` Python library that runs in the browser using one of the approaches (mostly PyScript or Pyodide). 
+
+During development/testing, you may use `https://github.com/google/fonts/raw/refs/heads/main/ofl/abrilfatface/AbrilFatface-Regular.ttf` as a remote test font file, or `testfont.ttf` in the `docs` folder.
+
+In addition, this repo contains a skeleton Python package `boabro`, which isn't really used, but if we need to, we may add some Python code there.
+
+Overall, this repo should be aimed at people who know Python, and would like to expand into the browser world. We want to provide them tips. 
+
+## Running Examples
+
+- The files in `docs` must run locally without a server. 
+- You may develop a Python tool plus `playwright` to test, as part of this repo. 
+- Examples that already are correct have a `_` prefix (e.g., `_gradio.html`)
+
+## Code Style Guidelines
+
+- Use `_puepy-bulma.html` or `_puepy-uikit.html` (from `docs`) for reference on how PyScript and the Python code should be integrated into the HTML. 
+- In each unprefixed file, there's already some draft code that uses a particular UI framework/approach. Ensure that the code is working correctly with each paradigm. 
+- Properly reference JS frameworks via CDN when used (Vue, React, etc.)
+- Comment code for clarity, especially framework interactions

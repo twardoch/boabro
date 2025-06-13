@@ -1,0 +1,163 @@
+<!DOCTYPE html>
+<html>
+<head>
+<title>Font Inspector with Gradio-Lite</title>
+<script type="module" crossorigin src="https://cdn.jsdelivr.net/npm/@gradio/lite/dist/lite.js"></script>
+<link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/@gradio/lite/dist/lite.css" />
+</head>
+<body>
+<!-- Gradio app container -->
+<gradio-lite theme="dark">
+<gradio-requirements>
+fonttools
+requests
+</gradio-requirements>
+<gradio-file name="app.py" entrypoint>
+import gradio as gr
+from fontTools.ttLib import TTFont
+import io
+import requests
+
+def inspect_font_file(font_file):
+    # font_file is an UploadedFile or file object in Gradio
+    font = TTFont(font_file.name if hasattr(font_file, "name") else font_file)
+    return analyze_font(font)
+
+def inspect_font_url(font_url):
+    if not font_url:
+        return "Please enter a URL"
+    
+    try:
+        # Add headers to avoid CORS issues
+        headers = {
+            "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/91.0.4472.124 Safari/537.36",
+            "Accept": "*/*",
+            "Accept-Language": "en-US,en;q=0.9"
+        }
+        
+        # List of CORS proxies to try in sequence
+        cors_proxies = [
+            "https://corsproxy.io/?url=",
+            "https://api.allorigins.win/raw?url=",
+            "https://cors.eu.org/",
+            "https://xofix.4kb.dev/?url="
+        ]
+        
+        # If it's a GitHub URL, try to use a more direct approach first
+        if "github.com" in font_url:
+            # Try to convert to raw.githubusercontent.com if not already
+            if "raw.githubusercontent.com" not in font_url:
+                # Convert github.com URL to raw.githubusercontent.com
+                raw_url = font_url.replace("github.com", "raw.githubusercontent.com")
+                raw_url = raw_url.replace("/blob/", "/")
+                print(f"Trying converted raw URL: {raw_url}")
+                try:
+                    response = requests.get(raw_url, headers=headers)
+                    if response.status_code == 200:
+                        font_data = io.BytesIO(response.content)
+                        font = TTFont(font_data)
+                        return analyze_font(font)
+                except Exception as raw_error:
+                    print(f"Raw URL request failed: {str(raw_error)}")
+        
+        # Try each CORS proxy in sequence
+        for proxy in cors_proxies:
+            proxy_url = f"{proxy}{font_url}"
+            print(f"Trying CORS proxy: {proxy}")
+            try:
+                response = requests.get(proxy_url, headers=headers)
+                if response.status_code == 200:
+                    print(f"Successfully fetched font via proxy: {proxy}")
+                    font_data = io.BytesIO(response.content)
+                    font = TTFont(font_data)
+                    return analyze_font(font)
+                else:
+                    print(f"Proxy {proxy} request failed with status: {response.status_code}")
+            except Exception as proxy_error:
+                print(f"Proxy {proxy} request failed: {str(proxy_error)}")
+        
+        # Try direct URL as fallback
+        print("Trying direct URL request")
+        response = requests.get(font_url, headers=headers)
+        
+        if response.status_code == 200:
+            font_data = io.BytesIO(response.content)
+            font = TTFont(font_data)
+            return analyze_font(font)
+        else:
+            return f"Error: Failed to fetch font. HTTP status code: {response.status_code}. All CORS proxies failed. Try downloading the font and uploading it directly."
+    except Exception as e:
+        return f"Error: {str(e)}. Try downloading the font and uploading it directly."
+
+def analyze_font(font):
+    # Get UPM value
+    upm = font["head"].unitsPerEm
+    
+    # Get name table entries
+    name_table = font["name"]
+    
+    # Create a list to store the name table data
+    name_data = []
+    
+    for record in name_table.names:
+        try:
+            name_id = record.nameID
+            platform_id = record.platformID
+            string = record.toUnicode()
+            name_data.append({"Name ID": name_id, "Platform ID": platform_id, "String": string})
+        except:
+            name_data.append({"Name ID": record.nameID, "Platform ID": record.platformID, "String": "(could not decode)"})
+    
+    # Format the output as Markdown
+    output = f"""
+## Font Information
+
+### Units Per Em (UPM)
+`{upm}`
+
+### Number of Glyphs
+`{len(font.getGlyphOrder())}`
+
+### Available Tables
+`{", ".join(sorted(font.keys()))}`
+
+### Name Table Entries
+
+| Name ID | Platform ID | String |
+|---------|-------------|--------|
+"""
+    
+    # Add table rows
+    for entry in name_data:
+        output += f"| {entry['Name ID']} | {entry['Platform ID']} | {entry['String']} |\n"
+        
+    return output
+
+with gr.Blocks(title="Font Inspector") as demo:
+    gr.Markdown("# Font Inspector with Gradio-Lite")
+    
+    with gr.Tab("Upload Font File"):
+        file_input = gr.File(file_types=[".ttf", ".otf"], label="Upload Font File")
+        file_output = gr.Markdown()
+        file_input.change(fn=inspect_font_file, inputs=file_input, outputs=file_output)
+    
+    with gr.Tab("Font URL"):
+        url_input = gr.Textbox(
+            label="Font URL", 
+            placeholder="Enter URL to a TTF or OTF font file",
+            value="https://github.com/google/fonts/raw/refs/heads/main/ofl/abrilfatface/AbrilFatface-Regular.ttf"
+        )
+        url_button = gr.Button("Analyze Font from URL")
+        url_output = gr.Markdown()
+        url_button.click(fn=inspect_font_url, inputs=url_input, outputs=url_output)
+    
+    gr.Markdown("""
+    ## About
+    This tool allows you to analyze TTF and OTF font files. You can either upload a font file or provide a URL to a font file.
+    """)
+
+demo.launch()
+</gradio-file>
+</gradio-lite>
+</body>
+</html>

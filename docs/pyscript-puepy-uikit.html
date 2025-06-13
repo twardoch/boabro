@@ -1,0 +1,565 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<!-- this_file: examples/font-inspector-uikit.html -->
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Font Inspector - UIkit</title>
+<!-- UIkit CSS -->
+<link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/uikit@3/dist/css/uikit.min.css">
+<!-- PyScript CSS and JS -->
+<link rel="stylesheet" href="https://pyscript.net/releases/2025.3.1/core.css">
+<script type="module" src="https://pyscript.net/releases/2025.3.1/core.js"></script>
+
+<style>
+  .debug-console {
+    max-height: 300px;
+    overflow-y: auto;
+    font-family: monospace;
+    font-size: 0.85rem;
+    background-color: #f8f8f8;
+    padding: 0.5rem;
+    border-radius: 4px;
+  }
+  
+  .gradient-text {
+    background: linear-gradient(90deg, #1e87f0, #32d296);
+    -webkit-background-clip: text;
+    background-clip: text;
+    color: transparent;
+    font-weight: bold;
+  }
+  
+  .loading-spinner {
+    display: inline-block;
+    width: 20px;
+    height: 20px;
+    margin-right: 8px;
+    border: 2px solid rgba(30, 135, 240, 0.2);
+    border-top-color: #1e87f0;
+    border-radius: 50%;
+    animation: spin 1s linear infinite;
+  }
+  
+  @keyframes spin {
+    to {
+      transform: rotate(360deg);
+    }
+  }
+</style>
+</head>
+<body>
+<!-- Navigation Bar -->
+<div uk-sticky="sel-target: .uk-navbar-container; cls-active: uk-navbar-sticky">
+  <nav class="uk-navbar-container" uk-navbar>
+    <div class="uk-navbar-left uk-margin-left">
+      <a class="uk-navbar-item uk-logo" href="#">
+        <span class="logo-icon" uk-icon="icon: file-text; ratio: 1.2"></span>
+        <span class="gradient-text">Font Inspector</span>
+      </a>
+    </div>
+    <div class="uk-navbar-right uk-margin-right">
+      <ul class="uk-navbar-nav">
+        <li><a href="#" uk-icon="icon: github"></a></li>
+        <li><a href="#" uk-icon="icon: question"></a></li>
+      </ul>
+    </div>
+  </nav>
+</div>
+
+<div class="uk-section">
+  <div class="uk-container">
+    <div class="uk-grid uk-child-width-1-1 uk-child-width-2-3@m uk-margin-auto">
+      <div>
+        <div class="uk-card uk-card-default uk-margin">
+          <div class="uk-card-header">
+            <h2 class="uk-card-title">Font Inspector Tool</h2>
+            <p class="uk-text-meta uk-margin-remove-top">Analyze and extract information from TTF and OTF font files</p>
+          </div>
+          <div class="uk-card-body">
+            <div id="app" class="uk-margin-medium-top">
+              <div class="uk-text-center">
+                <div uk-spinner="ratio: 2"></div>
+                <p>Loading application...</p>
+              </div>
+            </div>
+          </div>
+        </div>
+        
+        <div class="uk-card uk-card-default uk-margin">
+          <div class="uk-card-header">
+            <div class="uk-flex uk-flex-middle">
+              <h3 class="uk-card-title uk-margin-remove">Debug Console</h3>
+              <div class="uk-flex-1"></div>
+              <span class="uk-badge" style="background-color: #1e87f0;">Live</span>
+            </div>
+          </div>
+          <div class="uk-card-body uk-padding-small">
+            <div id="debug" class="debug-console"></div>
+          </div>
+        </div>
+      </div>
+    </div>
+  </div>
+</div>
+
+<!-- UIkit JS -->
+<script src="https://cdn.jsdelivr.net/npm/uikit@3/dist/js/uikit.min.js
+"></script>
+<script src="https://cdn.jsdelivr.net/npm/uikit@3/dist/js/uikit-icons.min.js"></script>
+
+
+<script type="py" config='{"packages":["puepy","fonttools"]}'>
+from puepy import Page, Application, t
+import io
+import traceback
+from fontTools.ttLib import TTFont
+from js import document, console, fetch, Uint8Array, URL, window
+from pyodide.ffi import create_proxy, to_js
+import asyncio
+
+def debug_log(message):
+    debug_div = document.getElementById("debug")
+    if debug_div:
+        debug_div.innerHTML += f"<div>{message}</div>"
+        # Auto-scroll to bottom
+        debug_div.scrollTop = debug_div.scrollHeight
+    console.log(message)
+
+debug_log("Script started")
+
+app = Application()
+
+@app.page()
+class FontInspector(Page):
+    def initial(self):
+        debug_log("Initial state created")
+        return {
+            "info": "",
+            "error": "",
+            "file_data": None,
+            "font_url": "https://github.com/google/fonts/raw/refs/heads/main/ofl/abrilfatface/AbrilFatface-Regular.ttf",
+            "is_processing": False,
+            "active_tab": "file"
+        }
+
+    def populate(self):
+        t.h3("Font Inspector", class_="uk-heading-small")
+        
+        # Tabs for file upload and URL input
+        with t.div(class_="uk-margin-medium-top"):
+            # Tab navigation
+            with t.ul(class_="uk-tab", uk_switcher="animation: uk-animation-fade; connect: #font-input-tabs"):
+                with t.li(class_="uk-active" if self.state["active_tab"] == "file" else ""):
+                    t.a("File Upload", href="#", on_click=lambda e: self.set_active_tab("file"))
+                with t.li(class_="" if self.state["active_tab"] == "file" else "uk-active"):
+                    t.a("Font URL", href="#", on_click=lambda e: self.set_active_tab("url"))
+            
+            # Tab content
+            with t.ul(class_="uk-switcher uk-margin", id="font-input-tabs"):
+                # File upload tab
+                with t.li(class_="uk-active" if self.state["active_tab"] == "file" else ""):
+                    t.p("Select a .ttf or .otf font file to analyze:")
+                    
+                    with t.div(class_="uk-margin"):
+                        t.label("Font File", for_="font-upload", class_="uk-form-label")
+                        with t.div(class_="uk-form-controls"):
+                            with t.div(class_="uk-inline uk-width-1-1"):
+                                t.span(uk_icon="icon: file", class_="uk-form-icon")
+                                t.input(
+                                    type="file",
+                                    accept=".ttf,.otf",
+                                    id="font-upload",
+                                    class_="uk-input",
+                                    on_change="fileSelected(event)",
+                                )
+                    
+                    # Show selected filename
+                    with t.div(class_="uk-margin-small-top"):
+                        t.div(
+                            "Selected file: ",
+                            t.span("No file chosen", id="file-name-display"),
+                            class_="uk-text-meta"
+                        )
+                    
+                    # Process button for file
+                    with t.div(class_="uk-margin uk-margin-medium-top"):
+                        button_class = "uk-button uk-button-primary uk-width-1-3"
+                        button_text = "Process Font"
+                        if self.state["is_processing"]:
+                            button_text = t.span(t.span(class_="loading-spinner"), "Processing...")
+                            
+                        t.button(
+                            button_text,
+                            class_=button_class,
+                            on_click=self.on_process_file_click,
+                            disabled=self.state["is_processing"]
+                        )
+                
+                # URL input tab
+                with t.li(class_="" if self.state["active_tab"] == "file" else "uk-active"):
+                    t.p("Enter a URL to a .ttf or .otf font file:")
+                    
+                    with t.div(class_="uk-margin"):
+                        t.label("Font URL", for_="font-url", class_="uk-form-label")
+                        with t.div(class_="uk-form-controls"):
+                            with t.div(class_="uk-inline uk-width-1-1"):
+                                t.span(uk_icon="icon: link", class_="uk-form-icon")
+                                t.input(
+                                    type="url",
+                                    id="font-url",
+                                    class_="uk-input",
+                                    value=self.state["font_url"],
+                                    on_input=self.on_url_change,
+                                    placeholder="https://example.com/font.ttf"
+                                )
+                    
+                    # Process button for URL
+                    with t.div(class_="uk-margin uk-margin-medium-top"):
+                        button_class = "uk-button uk-button-primary uk-width-1-3"
+                        button_text = "Process Font URL"
+                        if self.state["is_processing"]:
+                            button_text = t.span(t.span(class_="loading-spinner"), "Processing...")
+                            
+                        t.button(
+                            button_text,
+                            class_=button_class,
+                            on_click=self.on_process_url_click,
+                            disabled=self.state["is_processing"]
+                        )
+            
+            # Note about precedence
+            with t.div(class_="uk-margin-small-top"):
+                t.div(
+                    "Note: If both a file and URL are provided, the active tab will determine which is used.",
+                    class_="uk-text-meta"
+                )
+        
+        # Inline script for file selection feedback
+        t.script("""
+        function fileSelected(event) {
+            const fileName = event.target.files.length > 0 ? event.target.files[0].name : 'No file chosen';
+            document.getElementById('file-name-display').textContent = fileName;
+            
+            // Signal Python to process
+            const fileSelectedEvent = new CustomEvent('fileSelected');
+            document.dispatchEvent(fileSelectedEvent);
+        }
+        """)
+        
+        # Error message
+        if self.state["error"]:
+            with t.div(class_="uk-alert-danger uk-margin-medium-top", uk_alert=""):
+                t.a(class_="uk-alert-close", uk_close="")
+                t.p(self.state["error"])
+            
+        # Results
+        if self.state["info"]:
+            with t.div(class_="uk-card uk-card-default uk-margin-medium-top"):
+                with t.div(class_="uk-card-header"):
+                    t.h4("Font Information", class_="uk-card-title")
+                with t.div(class_="uk-card-body"):
+                    with t.div(class_="uk-background-muted uk-padding-small"):
+                        t.pre(self.state["info"], class_="uk-margin-remove")
+                with t.div(class_="uk-card-footer"):
+                    t.button("Reset", class_="uk-button uk-button-default", on_click=self.on_reset_click)
+
+    def set_active_tab(self, tab):
+        debug_log(f"Setting active tab to: {tab}")
+        self.state["active_tab"] = tab
+
+    def on_url_change(self, event):
+        debug_log(f"URL changed to: {event.target.value}")
+        self.state["font_url"] = event.target.value
+
+    def attached(self):
+        debug_log("Setting up file change handler")
+        
+        # File change handler
+        async def on_file_change(event):
+            debug_log("File input changed")
+            try:
+                file = event.target.files.item(0)
+                if not file:
+                    debug_log("No file selected")
+                    return
+                    
+                debug_log(f"File selected: {file.name}")
+                
+                # Read file data
+                array_buffer = await file.arrayBuffer()
+                data = array_buffer.to_bytes()
+                debug_log(f"Read {len(data)} bytes")
+                
+                # Store data for processing
+                self.state["file_data"] = data
+                debug_log("File data stored in state")
+                
+            except Exception as e:
+                debug_log(f"Error reading file: {str(e)}")
+                debug_log(traceback.format_exc())
+                self.state["error"] = f"Error reading file: {str(e)}"
+                
+        # Set up event listener with proper cleanup
+        callback = create_proxy(on_file_change)
+        
+        # Listen for the custom file selected event
+        def on_file_selected(event):
+            debug_log("Custom file selected event received")
+            # Set active tab to file
+            self.state["active_tab"] = "file"
+            
+        file_selected_callback = create_proxy(on_file_selected)
+        document.addEventListener("fileSelected", file_selected_callback)
+        debug_log("Added custom fileSelected event listener")
+        
+        # Ensure handler is attached after DOM is fully ready
+        def attach_handler():
+            # Get the file input element
+            upload = document.getElementById("font-upload")
+            if upload:
+                # Try to remove any existing listeners first
+                try:
+                    upload.removeEventListener("change", callback)
+                except:
+                    pass
+                
+                # Add the event listener
+                upload.addEventListener("change", callback)
+                debug_log("Change event listener attached")
+                
+                # Also add input event listener as fallback
+                try:
+                    upload.addEventListener("input", callback)
+                    debug_log("Input event listener attached as fallback")
+                except:
+                    pass
+            else:
+                debug_log("ERROR: Could not find upload element")
+        
+        # Run the attach handler
+        attach_handler()
+
+    async def fetch_font_from_url(self, url):
+        debug_log(f"Fetching font from URL: {url}")
+        
+        # Custom headers to help with CORS issues
+        headers = {
+            "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/91.0.4472.124 Safari/537.36",
+            "Accept": "*/*",
+            "Accept-Language": "en-US,en;q=0.9",
+            "Referer": window.location.href,
+            "Origin": window.location.origin
+        }
+        
+        # Convert headers to JS object
+        js_headers = to_js(headers)
+        
+        # List of CORS proxies to try
+        cors_proxies = [
+        "https://corsproxy.io/?url=",
+        "https://api.allorigins.win/raw?url=",
+        "https://cors.eu.org/",
+        "https://xofix.4kb.dev/?url="
+    ]
+
+        try:
+            # If it's a GitHub URL, try to use a more direct approach first
+            if "github.com" in url and "raw" in url:
+                # Try to convert to raw.githubusercontent.com if not already
+                if "raw.githubusercontent.com" not in url:
+                    # Convert github.com URL to raw.githubusercontent.com
+                    raw_url = url.replace("github.com", "raw.githubusercontent.com")
+                    raw_url = raw_url.replace("/blob/", "/")
+                    debug_log(f"Converted to raw URL: {raw_url}")
+                    try:
+                        response = await fetch(raw_url, {"headers": js_headers})
+                        if response.ok:
+                            debug_log("Raw URL request successful")
+                            array_buffer = await response.arrayBuffer()
+                            return array_buffer.to_bytes()
+                    except Exception as raw_error:
+                        debug_log(f"Raw URL request failed: {str(raw_error)}")
+            
+            # Try each CORS proxy in sequence
+            for proxy in cors_proxies:
+                proxy_url = f"{proxy}{url}"
+                debug_log(f"Trying CORS proxy: {proxy_url}")
+                try:
+                    response = await fetch(proxy_url, {"headers": js_headers})
+                    if response.ok:
+                        debug_log(f"Proxy {proxy} request successful")
+                        array_buffer = await response.arrayBuffer()
+                        return array_buffer.to_bytes()
+                    else:
+                        debug_log(f"Proxy {proxy} request failed with status: {response.status}")
+                except Exception as proxy_error:
+                    debug_log(f"Proxy {proxy} request failed: {str(proxy_error)}")
+            
+            # Try direct URL as fallback
+            debug_log("Trying direct URL request")
+            response = await fetch(url, {"headers": js_headers})
+            
+            if response.ok:
+                debug_log("Direct request successful")
+                array_buffer = await response.arrayBuffer()
+                return array_buffer.to_bytes()
+            else:
+                debug_log(f"Direct request failed with status: {response.status}")
+                
+                # Try with no-cors mode as last resort
+                debug_log("Trying with no-cors mode")
+                try:
+                    response = await fetch(url, {"mode": "no-cors", "headers": js_headers})
+                    array_buffer = await response.arrayBuffer()
+                    return array_buffer.to_bytes()
+                except Exception as e:
+                    debug_log(f"No-cors request failed: {str(e)}")
+            
+            # If we got here, all attempts failed
+            raise Exception("Failed to fetch font. CORS policy may be blocking the request. Try downloading the font and uploading it directly.")
+        
+        except Exception as e:
+            debug_log(f"Error fetching font: {str(e)}")
+            debug_log(traceback.format_exc())
+            raise Exception(f"Error fetching font: {str(e)}. Try downloading the font and uploading it directly.")
+
+    def on_process_file_click(self, event):
+        debug_log("Process file button clicked")
+        self.state["active_tab"] = "file"
+        
+        # Get file directly from the input element
+        upload = document.getElementById("font-upload")
+        if upload and upload.files and upload.files.length > 0:
+            debug_log("Found file in input element")
+            self.state["is_processing"] = True
+            
+            # Access file directly from the input element
+            async def process_file():
+                try:
+                    file = upload.files.item(0)
+                    debug_log(f"Processing file: {file.name}")
+                    
+                    # Read file data
+                    array_buffer = await file.arrayBuffer()
+                    data = array_buffer.to_bytes()
+                    debug_log(f"Read {len(data)} bytes")
+                    
+                    # Store data for processing
+                    self.state["file_data"] = data
+                    
+                    # Process immediately
+                    self.process_font()
+                    
+                except Exception as e:
+                    debug_log(f"Error accessing file: {str(e)}")
+                    debug_log(traceback.format_exc())
+                    self.state["error"] = f"Error accessing file: {str(e)}"
+                finally:
+                    self.state["is_processing"] = False
+            
+            # Run the async function
+            asyncio.ensure_future(process_file())
+            return
+        
+        # Fall back to using stored data
+        if not self.state["file_data"]:
+            self.state["error"] = "No file data. Please select a font file first."
+            return
+            
+        self.state["is_processing"] = True
+        self.process_font()
+        self.state["is_processing"] = False
+
+    def on_process_url_click(self, event):
+        debug_log("Process URL button clicked")
+        self.state["active_tab"] = "url"
+        
+        if not self.state["font_url"]:
+            self.state["error"] = "Please enter a font URL."
+            return
+        
+        self.state["is_processing"] = True
+        
+        async def process_url():
+            try:
+                debug_log(f"Processing URL: {self.state['font_url']}")
+                data = await self.fetch_font_from_url(self.state["font_url"])
+                debug_log(f"Fetched {len(data)} bytes from URL")
+                
+                # Store data for processing
+                self.state["file_data"] = data
+                
+                # Process immediately
+                self.process_font()
+            except Exception as e:
+                debug_log(f"Error fetching font from URL: {str(e)}")
+                debug_log(traceback.format_exc())
+                self.state["error"] = f"Error fetching font from URL: {str(e)}"
+            finally:
+                self.state["is_processing"] = False
+        
+        # Run the async function
+        asyncio.ensure_future(process_url())
+        
+    def on_reset_click(self, event):
+        debug_log("Reset clicked")
+        self.state["info"] = ""
+        self.state["error"] = ""
+        self.state["file_data"] = None
+        self.state["is_processing"] = False
+        
+        # Reset file input
+        upload = document.getElementById("font-upload")
+        if upload:
+            upload.value = ""
+            
+        # Reset file name display
+        file_name_display = document.getElementById("file-name-display")
+        if file_name_display:
+            file_name_display.textContent = "No file chosen"
+
+    def process_font(self):
+        debug_log("Processing font data")
+        try:
+            # Process font data
+            font_data = io.BytesIO(self.state["file_data"])
+            font = TTFont(font_data)
+            debug_log("Font loaded successfully")
+            
+            # Extract name table
+            names = font["name"]
+            
+            # Helper to get name 
+            def get_name(nameID):
+                entry = names.getName(nameID, 3, 1, 0x409) or names.getName(nameID, 1, 0, 0)
+                return entry.toStr() if entry else "(N/A)"
+            
+            # Basic font info
+            info = [
+                f"Family Name: {get_name(1)}",
+                f"Subfamily: {get_name(2)}",
+                f"Full Name: {get_name(4)}",
+                f"Units Per Em: {font['head'].unitsPerEm}",
+                f"Tables: {', '.join(sorted(font.keys()))}",
+                f"Number of Glyphs: {len(font.getGlyphOrder())}",
+            ]
+            
+            # Update state with info
+            self.state["info"] = "\n".join(info)
+            self.state["error"] = ""
+            debug_log("Font info extracted")
+            
+        except Exception as e:
+            error_msg = f"Error processing font: {str(e)}"
+            debug_log(error_msg)
+            debug_log(traceback.format_exc())
+            self.state["error"] = error_msg
+        finally:
+            self.state["is_processing"] = False
+
+app.mount("#app")
+debug_log("App mounted")
+</script>
+</body>
+</html> 

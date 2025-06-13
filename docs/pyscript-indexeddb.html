@@ -1,0 +1,546 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Font Inspector - IndexedDB Storage</title>
+  <link href="https://cdn.jsdelivr.net/npm/bootstrap@5.3.2/dist/css/bootstrap.min.css" rel="stylesheet">
+  <link rel="stylesheet" href="https://pyscript.net/releases/2025.3.1/core.css">
+  <script type="module" src="https://pyscript.net/releases/2025.3.1/core.js"></script>
+</head>
+<body>
+  <div class="container py-4">
+    <h1 class="mb-4">Font Inspector with IndexedDB</h1>
+    
+    <div class="row">
+      <div class="col-md-6">
+        <div class="card mb-4">
+          <div class="card-body">
+            <h5 class="card-title">Upload Font File</h5>
+            <p class="card-text">Select a TTF or OTF font file to analyze and save to IndexedDB.</p>
+            
+            <div class="mb-3">
+              <input type="file" class="form-control" id="font-file" accept=".ttf,.otf">
+            </div>
+            
+            <button id="analyze-btn" class="btn btn-primary">
+              Analyze Font
+            </button>
+          </div>
+        </div>
+        
+        <div class="card mb-4">
+          <div class="card-header d-flex justify-content-between align-items-center">
+            <h5 class="mb-0">Saved Fonts</h5>
+            <button id="clear-all-btn" class="btn btn-sm btn-outline-danger">Clear All</button>
+          </div>
+          <div class="card-body">
+            <div id="saved-fonts-list">
+              <p class="text-muted">Loading saved fonts...</p>
+            </div>
+          </div>
+        </div>
+      </div>
+      
+      <div class="col-md-6">
+        <div id="result-container"></div>
+      </div>
+    </div>
+  </div>
+
+  <py-config>
+    packages = ["fonttools"]
+  </py-config>
+  
+  <py-script>
+from fontTools.ttLib import TTFont
+import io
+import js
+
+def analyze_font(font_data, filename=None):
+    # Load the font from bytes
+    font_io = io.BytesIO(font_data)
+    font = TTFont(font_io)
+    
+    # Get UPM value
+    upm = font["head"].unitsPerEm
+    
+    # Get name table entries
+    name_table = font["name"]
+    
+    # Helper to get name 
+    def get_name(nameID):
+        entry = name_table.getName(nameID, 3, 1, 0x409) or name_table.getName(nameID, 1, 0, 0)
+        return entry.toUnicode() if entry else "(N/A)"
+    
+    # Create a list to store the name table data
+    name_data = []
+    
+    for record in name_table.names:
+        try:
+            name_id = record.nameID
+            platform_id = record.platformID
+            string = record.toUnicode()
+            name_data.append({"nameId": name_id, "platformId": platform_id, "string": string})
+        except:
+            name_data.append({"nameId": record.nameID, "platformId": record.platformID, "string": "(could not decode)"})
+    
+    # Return structured data
+    return {
+        "filename": filename,
+        "familyName": get_name(1),
+        "subfamily": get_name(2),
+        "fullName": get_name(4),
+        "version": get_name(5),
+        "upm": upm,
+        "nameTable": name_data,
+        "numGlyphs": len(font.getGlyphOrder()),
+        "tables": list(font.keys())
+    }
+
+# Function to be called from JavaScript
+def process_font(font_data_js, filename=None):
+    try:
+        # Convert JS Uint8Array to Python bytes
+        font_data = bytes(font_data_js.to_py())
+        result = analyze_font(font_data, filename)
+        return {"success": True, "data": result}
+    except Exception as e:
+        return {"success": False, "error": str(e)}
+  </py-script>
+
+
+  <script>
+    // IndexedDB setup
+    const DB_NAME = 'FontInspectorDB';
+    const DB_VERSION = 1;
+    const FONT_STORE = 'fonts';
+    
+    let db;
+    
+    // Open the database
+    const openDB = () => {
+      return new Promise((resolve, reject) => {
+        const request = indexedDB.open(DB_NAME, DB_VERSION);
+        
+        request.onerror = (event) => {
+          reject('Error opening database');
+        };
+        
+        request.onsuccess = (event) => {
+          db = event.target.result;
+          resolve(db);
+        };
+        
+        request.onupgradeneeded = (event) => {
+          const db = event.target.result;
+          
+          // Create an object store for fonts
+          if (!db.objectStoreNames.contains(FONT_STORE)) {
+            const store = db.createObjectStore(FONT_STORE, { keyPath: 'id', autoIncrement: true });
+            store.createIndex('filename', 'filename', { unique: false });
+            store.createIndex('familyName', 'familyName', { unique: false });
+          }
+        };
+      });
+    };
+    
+    // Save a font to IndexedDB
+    const saveFont = (fontData, fontInfo) => {
+      return new Promise((resolve, reject) => {
+        const transaction = db.transaction([FONT_STORE], 'readwrite');
+        const store = transaction.objectStore(FONT_STORE);
+        
+        const fontRecord = {
+          filename: fontInfo.filename,
+          familyName: fontInfo.familyName,
+          subfamily: fontInfo.subfamily,
+          fontData: fontData,
+          dateAdded: new Date().toISOString()
+        };
+        
+        const request = store.add(fontRecord);
+        
+        request.onsuccess = () => {
+          resolve(request.result);
+        };
+        
+        request.onerror = () => {
+          reject('Error saving font to database');
+        };
+      });
+    };
+    
+    // Get all saved fonts
+    const getAllFonts = () => {
+      return new Promise((resolve, reject) => {
+        const transaction = db.transaction([FONT_STORE], 'readonly');
+        const store = transaction.objectStore(FONT_STORE);
+        const request = store.getAll();
+        
+        request.onsuccess = () => {
+          resolve(request.result);
+        };
+        
+        request.onerror = () => {
+          reject('Error getting fonts from database');
+        };
+      });
+    };
+    
+    // Get a font by ID
+    const getFontById = (id) => {
+      return new Promise((resolve, reject) => {
+        const transaction = db.transaction([FONT_STORE], 'readonly');
+        const store = transaction.objectStore(FONT_STORE);
+        const request = store.get(id);
+        
+        request.onsuccess = () => {
+          resolve(request.result);
+        };
+        
+        request.onerror = () => {
+          reject('Error getting font from database');
+        };
+      });
+    };
+    
+    // Delete a font by ID
+    const deleteFontById = (id) => {
+      return new Promise((resolve, reject) => {
+        const transaction = db.transaction([FONT_STORE], 'readwrite');
+        const store = transaction.objectStore(FONT_STORE);
+        const request = store.delete(id);
+        
+        request.onsuccess = () => {
+          resolve();
+        };
+        
+        request.onerror = () => {
+          reject('Error deleting font from database');
+        };
+      });
+    };
+    
+    // Clear all fonts
+    const clearAllFonts = () => {
+      return new Promise((resolve, reject) => {
+        const transaction = db.transaction([FONT_STORE], 'readwrite');
+        const store = transaction.objectStore(FONT_STORE);
+        const request = store.clear();
+        
+        request.onsuccess = () => {
+          resolve();
+        };
+        
+        request.onerror = () => {
+          reject('Error clearing fonts from database');
+        };
+      });
+    };
+    
+    // Update the saved fonts list in the UI
+    const updateSavedFontsList = async () => {
+      const savedFontsList = document.getElementById('saved-fonts-list');
+      
+      try {
+        const fonts = await getAllFonts();
+        
+        if (fonts.length === 0) {
+          savedFontsList.innerHTML = '<p class="text-muted">No saved fonts yet.</p>';
+          return;
+        }
+        
+        let html = '<ul class="list-group">';
+        
+        fonts.forEach(font => {
+          const date = new Date(font.dateAdded).toLocaleDateString();
+          
+          html += `
+            <li class="list-group-item d-flex justify-content-between align-items-center">
+              <div>
+                <strong>${font.familyName}</strong>
+                <small class="d-block text-muted">${font.subfamily}</small>
+                <small class="d-block text-muted">${font.filename} (Added: ${date})</small>
+              </div>
+              <div>
+                <button class="btn btn-sm btn-outline-primary load-font-btn" data-id="${font.id}">
+                  Load
+                </button>
+                <button class="btn btn-sm btn-outline-danger delete-font-btn" data-id="${font.id}">
+                  Delete
+                </button>
+              </div>
+            </li>
+          `;
+        });
+        
+        html += '</ul>';
+        
+        savedFontsList.innerHTML = html;
+        
+        // Add event listeners to the buttons
+        document.querySelectorAll('.load-font-btn').forEach(button => {
+          button.addEventListener('click', async (event) => {
+            const id = parseInt(event.target.dataset.id);
+            await loadSavedFont(id);
+          });
+        });
+        
+        document.querySelectorAll('.delete-font-btn').forEach(button => {
+          button.addEventListener('click', async (event) => {
+            const id = parseInt(event.target.dataset.id);
+            await deleteSavedFont(id);
+          });
+        });
+      } catch (error) {
+        savedFontsList.innerHTML = `<p class="text-danger">Error loading saved fonts: ${error}</p>`;
+      }
+    };
+    
+    // Load a saved font
+    const loadSavedFont = async (id) => {
+      const resultContainer = document.getElementById('result-container');
+      
+      try {
+        resultContainer.innerHTML = `
+          <div class="card mb-4">
+            <div class="card-body text-center">
+              <div class="spinner-border text-primary mb-3"></div>
+              <p>Loading font from database...</p>
+            </div>
+          </div>
+        `;
+        
+        // Get the font from IndexedDB
+        const font = await getFontById(id);
+        
+        if (!font) {
+          throw new Error('Font not found');
+        }
+        
+        // Get the Python interpreter
+        const pyodide = await pyscript.interpreter;
+        
+        // Call the Python function to analyze the font
+        const response = await pyodide.globals.get('process_font')(
+          new Uint8Array(font.fontData),
+          font.filename
+        );
+        
+        if (response.success) {
+          displayResult(response.data);
+        } else {
+          displayError(response.error);
+        }
+      } catch (error) {
+        displayError(error.message);
+      }
+    };
+    
+    // Delete a saved font
+    const deleteSavedFont = async (id) => {
+      if (!confirm('Are you sure you want to delete this font?')) {
+        return;
+      }
+      
+      try {
+        await deleteFontById(id);
+        await updateSavedFontsList();
+      } catch (error) {
+        alert(`Error deleting font: ${error}`);
+      }
+    };
+    
+    // Function to display the analysis result
+    function displayResult(result) {
+      const resultContainer = document.getElementById('result-container');
+      
+      resultContainer.innerHTML = `
+        <div class="card mb-4">
+          <div class="card-header d-flex justify-content-between align-items-center">
+            <h5 class="mb-0">Font Analysis: ${result.filename}</h5>
+          </div>
+          <div class="card-body">
+            <div class="mb-4">
+              <h6>Font Information</h6>
+              <div class="row">
+                <div class="col-md-6 mb-3">
+                  <div class="card h-100">
+                    <div class="card-body">
+                      <h6 class="card-title">Family Name</h6>
+                      <p class="card-text fs-4">${result.familyName}</p>
+                      <p class="card-text text-muted">Style: ${result.subfamily}</p>
+                    </div>
+                  </div>
+                </div>
+                <div class="col-md-6 mb-3">
+                  <div class="card h-100">
+                    <div class="card-body">
+                      <h6 class="card-title">Version</h6>
+                      <p class="card-text">${result.version}</p>
+                    </div>
+                  </div>
+                </div>
+              </div>
+            </div>
+            
+            <div class="mb-4">
+              <h6>Technical Details</h6>
+              <div class="row">
+                <div class="col-md-6 mb-3">
+                  <div class="card h-100">
+                    <div class="card-body">
+                      <h6 class="card-title">Units Per Em (UPM)</h6>
+                      <p class="card-text display-6">${result.upm}</p>
+                    </div>
+                  </div>
+                </div>
+                <div class="col-md-6 mb-3">
+                  <div class="card h-100">
+                    <div class="card-body">
+                      <h6 class="card-title">Number of Glyphs</h6>
+                      <p class="card-text display-6">${result.numGlyphs}</p>
+                    </div>
+                  </div>
+                </div>
+              </div>
+            </div>
+            
+            <div class="mb-4">
+              <h6>Available Tables</h6>
+              <div class="d-flex flex-wrap gap-2">
+                ${result.tables.map(table => `
+                  <span class="badge bg-secondary">${table}</span>
+                `).join('')}
+              </div>
+            </div>
+            
+            <div class="mb-4">
+              <h6>Name Table Entries</h6>
+              <div class="table-responsive">
+                <table class="table table-sm table-striped table-bordered">
+                  <thead>
+                    <tr>
+                      <th>Name ID</th>
+                      <th>Platform ID</th>
+                      <th>String</th>
+                    </tr>
+                  </thead>
+                  <tbody>
+                    ${result.nameTable.map(entry => `
+                      <tr>
+                        <td>${entry.nameId}</td>
+                        <td>${entry.platformId}</td>
+                        <td>${entry.string}</td>
+                      </tr>
+                    `).join('')}
+                  </tbody>
+                </table>
+              </div>
+            </div>
+          </div>
+        </div>
+      `;
+    }
+    
+    // Function to display an error
+    function displayError(errorMessage) {
+      const resultContainer = document.getElementById('result-container');
+      
+      resultContainer.innerHTML = `
+        <div class="card mb-4">
+          <div class="card-header bg-danger text-white">
+            <h5 class="mb-0">Error</h5>
+          </div>
+          <div class="card-body">
+            <p>${errorMessage}</p>
+          </div>
+        </div>
+      `;
+    }
+    
+    // Initialize the application
+    document.addEventListener('py:ready', async () => {
+      try {
+        // Open the database
+        await openDB();
+        
+        // Update the saved fonts list
+        await updateSavedFontsList();
+        
+        const fileInput = document.getElementById('font-file');
+        const analyzeButton = document.getElementById('analyze-btn');
+        const clearAllButton = document.getElementById('clear-all-btn');
+        const resultContainer = document.getElementById('result-container');
+        
+        // Get the Python interpreter
+        const pyodide = await pyscript.interpreter;
+        
+        // Analyze button click handler
+        analyzeButton.addEventListener('click', async () => {
+          const file = fileInput.files[0];
+          
+          if (!file) {
+            alert('Please select a font file first.');
+            return;
+          }
+          
+          try {
+            resultContainer.innerHTML = `
+              <div class="card mb-4">
+                <div class="card-body text-center">
+                  <div class="spinner-border text-primary mb-3"></div>
+                  <p>Analyzing font file...</p>
+                </div>
+              </div>
+            `;
+            
+            const arrayBuffer = await file.arrayBuffer();
+            const fontData = new Uint8Array(arrayBuffer);
+            
+            // Call the Python function to analyze the font
+            const response = await pyodide.globals.get('process_font')(
+              fontData,
+              file.name
+            );
+            
+            if (response.success) {
+              // Save the font to IndexedDB
+              await saveFont(arrayBuffer, response.data);
+              
+              // Display the result
+              displayResult(response.data);
+              
+              // Update the saved fonts list
+              await updateSavedFontsList();
+            } else {
+              displayError(response.error);
+            }
+          } catch (error) {
+            displayError(error.message);
+          }
+        });
+        
+        // Clear all button click handler
+        clearAllButton.addEventListener('click', async () => {
+          if (!confirm('Are you sure you want to clear all saved fonts?')) {
+            return;
+          }
+          
+          try {
+            await clearAllFonts();
+            await updateSavedFontsList();
+            
+            resultContainer.innerHTML = '';
+          } catch (error) {
+            alert(`Error clearing fonts: ${error}`);
+          }
+        });
+      } catch (error) {
+        alert(`Error initializing application: ${error}`);
+      }
+    });
+  </script>
+</body>
+</html>

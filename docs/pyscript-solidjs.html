@@ -1,0 +1,253 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Font Inspector - Solid.js + PyScript</title>
+  <script src="https://cdn.jsdelivr.net/npm/solid-js@1.7.11/dist/solid.js"></script>
+  <!-- Local JSX transformer -->
+  <script src="https://unpkg.com/@babel/standalone/babel.min.js"></script>
+  <script>
+    Babel.registerPreset('solid', {
+      presets: [],
+      plugins: [
+        [Babel.availablePlugins['jsx'], { runtime: 'automatic' }]
+      ]
+    });
+  </script>
+  <link rel="stylesheet" href="https://pyscript.net/releases/2025.3.1/core.css">
+  <script type="module" src="https://pyscript.net/releases/2025.3.1/core.js"></script>
+  <link href="https://cdn.jsdelivr.net/npm/tailwindcss@2.2.19/dist/tailwind.min.css" rel="stylesheet">
+</head>
+<body class="bg-gray-100 min-h-screen">
+  <div id="app" class="container mx-auto px-4 py-8"></div>
+
+  <py-config>
+    packages = ["fonttools"]
+  </py-config>
+  
+  <py-script>
+from fontTools.ttLib import TTFont
+import io
+import js
+
+def analyze_font(font_data):
+    # Load the font from bytes
+    font_io = io.BytesIO(font_data)
+    font = TTFont(font_io)
+    
+    # Get UPM value
+    upm = font["head"].unitsPerEm
+    
+    # Get name table entries
+    name_table = font["name"]
+    
+    # Create a list to store the name table data
+    name_data = []
+    
+    for record in name_table.names:
+        try:
+            name_id = record.nameID
+            platform_id = record.platformID
+            string = record.toUnicode()
+            name_data.append({"nameId": name_id, "platformId": platform_id, "string": string})
+        except:
+            name_data.append({"nameId": record.nameID, "platformId": record.platformID, "string": "(could not decode)"})
+    
+    # Return structured data
+    return {
+        "upm": upm,
+        "nameTable": name_data,
+        "numGlyphs": len(font.getGlyphOrder()),
+        "tables": list(font.keys())
+    }
+
+# Function to be called from JavaScript
+def process_font(font_data_js):
+    try:
+        # Convert JS Uint8Array to Python bytes
+        font_data = bytes(font_data_js.to_py())
+        result = analyze_font(font_data)
+        return {"success": True, "data": result}
+    except Exception as e:
+        return {"success": False, "error": str(e)}
+  </py-script>
+
+  <script type="text/babel" data-presets="solid">
+    // Wait for Solid.js and PyScript to load
+    document.addEventListener('py:ready', () => {
+      const { createSignal, createEffect, onCleanup } = window.solid;
+      
+      // Create the app
+      const App = () => {
+        const [hasFile, setHasFile] = createSignal(false);
+        const [processing, setProcessing] = createSignal(false);
+        const [result, setResult] = createSignal(null);
+        const [error, setError] = createSignal(null);
+        const [fileName, setFileName] = createSignal(null);
+        let fileData = null;
+        
+        const handleFileChange = (event) => {
+          const files = event.target.files;
+          setHasFile(files.length > 0);
+          
+          if (files.length > 0) {
+            fileData = files[0];
+            setFileName(fileData.name);
+          } else {
+            setFileName(null);
+          }
+          
+          setResult(null);
+          setError(null);
+        };
+        
+        const analyzeFontFile = async () => {
+          if (!hasFile()) return;
+          
+          setProcessing(true);
+          setError(null);
+          
+          try {
+            const arrayBuffer = await fileData.arrayBuffer();
+            const fontData = new Uint8Array(arrayBuffer);
+            
+            // Call the Python function
+            const pyodide = await pyscript.interpreter;
+            const response = await pyodide.globals.get('process_font')(fontData);
+            
+            if (response.success) {
+              setResult(response.data);
+            } else {
+              setError(`Error analyzing font: ${response.error}`);
+              setResult(null);
+            }
+          } catch (err) {
+            setError(`Error: ${err.message}`);
+            setResult(null);
+          } finally {
+            setProcessing(false);
+          }
+        };
+        
+        return () => (
+          <div>
+            <h1 class="text-3xl font-bold mb-6">Font Inspector</h1>
+            
+            <div class="bg-white rounded-lg shadow-md p-6 mb-6">
+              <h2 class="text-xl font-semibold mb-4">Upload Font File</h2>
+              <p class="mb-4">Select a TTF or OTF font file to analyze its properties.</p>
+              
+              <div class="mb-4">
+                <label for="font-file" class="block text-sm font-medium text-gray-700 mb-1">
+                  Font File
+                </label>
+                <input 
+                  type="file" 
+                  id="font-file" 
+                  accept=".ttf,.otf" 
+                  onChange={handleFileChange}
+                  class="block w-full text-sm text-gray-500 file:mr-4 file:py-2 file:px-4 file:rounded-md file:border-0 file:text-sm file:font-semibold file:bg-blue-50 file:text-blue-700 hover:file:bg-blue-100"
+                  disabled={processing()}
+                />
+              </div>
+              
+              {fileName() && (
+                <p class="text-sm text-gray-500 mb-4">Selected file: {fileName()}</p>
+              )}
+              
+              <button 
+                onClick={analyzeFontFile}
+                class="px-4 py-2 bg-blue-600 text-white rounded-md hover:bg-blue-700 focus:outline-none focus:ring-2 focus:ring-blue-500 focus:ring-offset-2 disabled:opacity-50 disabled:cursor-not-allowed"
+                disabled={!hasFile() || processing()}
+              >
+                {processing() ? 'Processing...' : 'Analyze Font'}
+              </button>
+            </div>
+            
+            {processing() && (
+              <div class="bg-white rounded-lg shadow-md p-6 mb-6">
+                <div class="flex justify-center">
+                  <div class="animate-spin rounded-full h-10 w-10 border-b-2 border-blue-600"></div>
+                </div>
+                <p class="text-center mt-4">Analyzing font file...</p>
+              </div>
+            )}
+            
+            {error() && (
+              <div class="bg-red-50 border border-red-200 text-red-700 px-4 py-3 rounded-lg mb-6">
+                <h3 class="text-lg font-medium">Error</h3>
+                <p>{error()}</p>
+              </div>
+            )}
+            
+            {result() && (
+              <div class="bg-white rounded-lg shadow-md p-6 mb-6">
+                <h2 class="text-xl font-semibold mb-4">Font Information</h2>
+                
+                <div class="grid grid-cols-1 md:grid-cols-2 gap-4 mb-6">
+                  <div class="bg-gray-50 p-4 rounded-lg">
+                    <h3 class="text-lg font-medium text-gray-800">Units Per Em (UPM)</h3>
+                    <p class="text-3xl font-bold text-blue-600">{result().upm}</p>
+                  </div>
+                  
+                  <div class="bg-gray-50 p-4 rounded-lg">
+                    <h3 class="text-lg font-medium text-gray-800">Number of Glyphs</h3>
+                    <p class="text-3xl font-bold text-blue-600">{result().numGlyphs}</p>
+                  </div>
+                </div>
+                
+                <h3 class="text-lg font-medium mb-2">Available Tables</h3>
+                <div class="flex flex-wrap gap-2 mb-6">
+                  {result().tables.map(table => (
+                    <span class="inline-block bg-gray-100 text-gray-800 px-2 py-1 rounded text-sm">
+                      {table}
+                    </span>
+                  ))}
+                </div>
+                
+                <h3 class="text-lg font-medium mb-2">Name Table Entries</h3>
+                <div class="overflow-x-auto">
+                  <table class="min-w-full divide-y divide-gray-200">
+                    <thead class="bg-gray-50">
+                      <tr>
+                        <th class="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">
+                          Name ID
+                        </th>
+                        <th class="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">
+                          Platform ID
+                        </th>
+                        <th class="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">
+                          String
+                        </th>
+                      </tr>
+                    </thead>
+                    <tbody class="bg-white divide-y divide-gray-200">
+                      {result().nameTable.map(entry => (
+                        <tr>
+                          <td class="px-6 py-4 whitespace-nowrap text-sm text-gray-500">
+                            {entry.nameId}
+                          </td>
+                          <td class="px-6 py-4 whitespace-nowrap text-sm text-gray-500">
+                            {entry.platformId}
+                          </td>
+                          <td class="px-6 py-4 text-sm text-gray-500">
+                            {entry.string}
+                          </td>
+                        </tr>
+                      ))}
+                    </tbody>
+                  </table>
+                </div>
+              </div>
+            )}
+          </div>
+        );
+      };
+      
+      // Render the app
+      window.solid.render(App, document.getElementById('app'));
+    });
+  </script>
+</body>
+</html>

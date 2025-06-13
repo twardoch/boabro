@@ -426,13 +426,13 @@
   </div>
 </footer>
 
-<script type="py" config='{"packages":["puepy", "fonttools", "pillow"]}'>
+<script type="py" config='{"packages":["puepy","fonttools"]}'>
 from puepy import Page, Application, t
 import io
 import traceback
 import json
 from fontTools.ttLib import TTFont
-from js import document, console, CSS, CSSStyleSheet, window, JSON
+from js import document, console, window
 from pyodide.ffi import create_proxy
 
 def debug_log(message):
@@ -472,42 +472,28 @@ class FontInspector(Page):
         with t.div(class_="box"):
             t.p("Select a .ttf or .otf font file to analyze, or provide a URL:", class_="mb-3")
             
-            # Drag-and-drop file upload area
+            # File upload field
             with t.div(class_="field"):
                 t.label("Font File", for_="font-upload", class_="label")
-                with t.div(id="drag-drop-area", class_="box has-text-centered p-5", style="border: 2px dashed var(--border-visible); background-color: var(--bg-elevated);"):
-                    t.div(
-                        t.span(class_="icon is-large mb-3"),
-                        t.i(class_="fas fa-file-upload fa-2x"),
-                        t.p("Drag and drop a font file here, or click to select", class_="mb-3"),
-                        t.p(".ttf, .otf, .woff, .woff2 files accepted", class_="is-size-7 has-text-grey"),
-                        with t.div(class_="file is-centered mt-3"):
-                            with t.label(class_="file-label"):
-                                t.input(
-                                    type="file",
-                                    accept=".ttf,.otf,.woff,.woff2",
-                                    id="font-upload",
-                                    class_="file-input",
-                                    on_change="fileSelected(event)",
-                                )
-                                with t.span(class_="file-cta"):
-                                    with t.span(class_="file-icon"):
-                                        t.i(class_="fas fa-upload")
-                                    with t.span(class_="file-label"):
-                                        t.text("Choose a file")
+                with t.div(class_="control has-icons-left"):
+                    t.input(
+                        type="file",
+                        accept=".ttf,.otf",
+                        id="font-upload",
+                        class_="input",
+                        on_change="fileSelected(event)",
                     )
+                    with t.span(class_="icon is-small is-left"):
+                        t.i(class_="fas fa-file")
             
-            # Show selected filename with preview icon
+            # Show selected filename
             with t.div(class_="field mt-2"):
                 with t.div(class_="control"):
-                    with t.div(class_="notification is-light p-3", style="display: none;", id="file-selected-notification"):
-                        with t.div(class_="is-flex is-align-items-center"):
-                            with t.span(class_="icon mr-2"):
-                                t.i(class_="fas fa-check-circle has-text-success")
-                            t.span("Selected file: ", class_="has-text-weight-bold")
-                            t.span("No file chosen", id="file-name-display", class_="ml-1")
-                            with t.button(class_="delete ml-auto", on_click="clearFileSelection()"):
-                                t.text("")
+                    t.div(
+                        "Selected file: ",
+                        t.span("No file chosen", id="file-name-display"),
+                        class_="is-size-7 has-text-grey"
+                    )
             
             # Font URL field
             with t.div(class_="field mt-3"):
@@ -525,21 +511,17 @@ class FontInspector(Page):
                         t.i(class_="fas fa-link")
                 t.p("If both file and URL are provided, the file will be used.", class_="help")
             
-            # Process button with loading animation
+            # Process button
             with t.div(class_="field mt-4"):
-                with t.div(class_="is-flex is-justify-content-center"):
-                    with t.div(class_="control"):
-                        button_text = "Processing..." if self.state["is_processing"] else "Process Font"
-                        button_class = "button is-primary is-medium is-loading" if self.state["is_processing"] else "button is-primary is-medium"
-                        t.button(
-                            t.span(class_="icon mr-1"),
-                            t.i(class_="fas fa-cog"),
-                            t.span(button_text),
-                            class_=button_class,
-                            on_click=self.on_process_click,
-                            disabled=self.state["is_processing"],
-                            id="process-button"
-                        )
+                with t.div(class_="control"):
+                    button_text = "Processing..." if self.state["is_processing"] else "Process Font"
+                    button_class = "button is-primary is-loading" if self.state["is_processing"] else "button is-primary"
+                    t.button(
+                        button_text,
+                        class_=button_class,
+                        on_click=self.on_process_click,
+                        disabled=self.state["is_processing"],
+                    )
             
             # Preset fonts list for quick testing
             with t.div(class_="field mt-4"):
@@ -635,78 +617,13 @@ class FontInspector(Page):
         # Inline script for file selection feedback
         t.script("""
         function fileSelected(event) {
-            const fileInput = event.target;
-            const files = fileInput.files;
-            const fileName = files.length > 0 ? files[0].name : 'No file chosen';
-            const fileDisplay = document.getElementById('file-name-display');
-            const notification = document.getElementById('file-selected-notification');
+            const fileName = event.target.files.length > 0 ? event.target.files[0].name : 'No file chosen';
+            document.getElementById('file-name-display').textContent = fileName;
             
-            if (files.length > 0) {
-                fileDisplay.textContent = fileName;
-                notification.style.display = 'block';
-                
-                // Signal Python to process
-                const fileSelectedEvent = new CustomEvent('fileSelected');
-                document.dispatchEvent(fileSelectedEvent);
-            } else {
-                clearFileSelection();
-            }
+            // Signal Python to process
+            const fileSelectedEvent = new CustomEvent('fileSelected');
+            document.dispatchEvent(fileSelectedEvent);
         }
-        
-        function clearFileSelection() {
-            const fileInput = document.getElementById('font-upload');
-            const fileDisplay = document.getElementById('file-name-display');
-            const notification = document.getElementById('file-selected-notification');
-            
-            fileInput.value = '';
-            fileDisplay.textContent = 'No file chosen';
-            notification.style.display = 'none';
-        }
-        
-        // Add event listeners for drag and drop once DOM is loaded
-        document.addEventListener('DOMContentLoaded', () => {
-            const dropArea = document.getElementById('drag-drop-area');
-            
-            if (dropArea) {
-                ['dragenter', 'dragover', 'dragleave', 'drop'].forEach(eventName => {
-                    dropArea.addEventListener(eventName, preventDefaults, false);
-                });
-                
-                function preventDefaults(e) {
-                    e.preventDefault();
-                    e.stopPropagation();
-                }
-                
-                ['dragenter', 'dragover'].forEach(eventName => {
-                    dropArea.addEventListener(eventName, highlight, false);
-                });
-                
-                ['dragleave', 'drop'].forEach(eventName => {
-                    dropArea.addEventListener(eventName, unhighlight, false);
-                });
-                
-                function highlight() {
-                    dropArea.classList.add('has-background-dark');
-                }
-                
-                function unhighlight() {
-                    dropArea.classList.remove('has-background-dark');
-                }
-                
-                dropArea.addEventListener('drop', handleDrop, false);
-                
-                function handleDrop(e) {
-                    const fileInput = document.getElementById('font-upload');
-                    const dt = e.dataTransfer;
-                    const files = dt.files;
-                    
-                    if (files.length > 0) {
-                        fileInput.files = files;
-                        fileSelected({target: fileInput});
-                    }
-                }
-            }
-        });
         """)
         
         # Error message
@@ -720,31 +637,29 @@ class FontInspector(Page):
                 t.h4(f"Font Preview: {self.state['font_name']}", class_="title is-5 mb-3")
                 
                 # Preview controls
-                with t.div(class_="preview-controls"):
-                    # Text input
-                    with t.div(class_="field is-flex-grow-1"):
-                        t.label("Preview Text", class_="label")
-                        with t.div(class_="control"):
-                            t.input(
-                                type="text",
-                                class_="input",
-                                value=self.state["preview_text"],
-                                on_input=self.on_preview_text_change,
-                                placeholder="Enter text to preview"
-                            )
-                    
-                    # Size slider
-                    with t.div(class_="field preview-size-control"):
-                        t.label(f"Size: {self.state['preview_size']}px", class_="label")
-                        with t.div(class_="control"):
-                            t.input(
-                                type="range",
-                                min="8",
-                                max="72",
-                                value=str(self.state["preview_size"]),
-                                class_="slider is-fullwidth",
-                                on_input=self.on_size_change
-                            )
+                with t.div(class_="field"):
+                    t.label("Preview Text", class_="label")
+                    with t.div(class_="control"):
+                        t.input(
+                            type="text",
+                            class_="input",
+                            value=self.state["preview_text"],
+                            on_input=self.on_preview_text_change,
+                            placeholder="Enter text to preview"
+                        )
+                
+                # Size slider
+                with t.div(class_="field mt-3"):
+                    t.label(f"Size: {self.state['preview_size']}px", class_="label")
+                    with t.div(class_="control"):
+                        t.input(
+                            type="range",
+                            min="8",
+                            max="72",
+                            value=str(self.state["preview_size"]),
+                            class_="slider is-fullwidth",
+                            on_input=self.on_size_change
+                        )
                 
                 # Preview area
                 with t.div(class_="font-preview", id="preview-area"):
@@ -759,111 +674,18 @@ class FontInspector(Page):
             with t.div(class_="box mt-4"):
                 t.h4("Font Information", class_="title is-5 mb-3")
                 
-                # Tabs
-                with t.div(class_="tabs"):
-                    with t.ul():
-                        t.li(
-                            t.a("Basic Info", on_click=lambda e: self.set_active_tab("basic")),
-                            class_="is-active" if self.state["active_tab"] == "basic" else ""
-                        )
-                        t.li(
-                            t.a("Tables", on_click=lambda e: self.set_active_tab("tables")),
-                            class_="is-active" if self.state["active_tab"] == "tables" else ""
-                        )
-                        t.li(
-                            t.a("Features", on_click=lambda e: self.set_active_tab("features")),
-                            class_="is-active" if self.state["active_tab"] == "features" else ""
-                        )
-                
-                # Tab content
-                with t.div(class_="tabs-content"):
-                    # Basic info tab
-                    with t.div(
-                        class_=f"tab-content {'is-active' if self.state['active_tab'] == 'basic' else ''}",
-                        id="tab-basic"
-                    ):
-                        with t.div(class_="notification is-light"):
-                            t.pre(self.state["info"])
-                    
-                    # Tables tab
-                    with t.div(
-                        class_=f"tab-content {'is-active' if self.state['active_tab'] == 'tables' else ''}",
-                        id="tab-tables"
-                    ):
-                        if "tables" in self.state["detailed_info"]:
-                            with t.div(class_="font-info"):
-                                for table, description in self.state["detailed_info"]["tables"].items():
-                                    with t.div(class_="font-info-item"):
-                                        t.div(table, class_="font-info-label")
-                                        t.div(description, class_="font-info-value")
-                        else:
-                            t.p("No table information available.")
-                    
-                    # Features tab
-                    with t.div(
-                        class_=f"tab-content {'is-active' if self.state['active_tab'] == 'features' else ''}",
-                        id="tab-features"
-                    ):
-                        if "features" in self.state["detailed_info"]:
-                            with t.div(class_="notification is-light"):
-                                t.pre(json.dumps(self.state["detailed_info"]["features"], indent=2))
-                        else:
-                            t.p("No feature information available.")
-                
-                # Sharing options
-                with t.div(class_="field mt-4 mb-2"):
-                    t.h5("Share This Font", class_="has-text-weight-bold mb-2")
-                    with t.div(class_="buttons"):
-                        with t.button(
-                            class_="button is-small is-info",
-                            on_click="copyShareLink()",
-                            id="share-button"
-                        ):
-                            with t.span(class_="icon is-small"):
-                                t.i(class_="fas fa-link")
-                            t.span("Copy Link")
-                        with t.button(
-                            class_="button is-small is-twitter",
-                            style="background-color: #1DA1F2; color: white;",
-                            on_click="shareOnTwitter()",
-                        ):
-                            with t.span(class_="icon is-small"):
-                                t.i(class_="fab fa-twitter")
-                            t.span("Twitter")
-                
-                # Share script
-                t.script("""
-                function copyShareLink() {
-                    const fontUrl = document.getElementById('font-url').value;
-                    if (fontUrl) {
-                        const shareUrl = window.location.href.split('?')[0] + '?font=' + encodeURIComponent(fontUrl);
-                        navigator.clipboard.writeText(shareUrl).then(() => {
-                            // Change button text temporarily
-                            const shareButton = document.getElementById('share-button');
-                            const originalContent = shareButton.innerHTML;
-                            shareButton.innerHTML = '<span class="icon is-small"><i class="fas fa-check"></i></span><span>Copied!</span>';
-                            setTimeout(() => {
-                                shareButton.innerHTML = originalContent;
-                            }, 2000);
-                        });
-                    }
-                }
-                
-                function shareOnTwitter() {
-                    const fontUrl = document.getElementById('font-url').value;
-                    const fontName = document.querySelector('.title.is-5').textContent.replace('Font Preview: ', '');
-                    if (fontUrl) {
-                        const shareUrl = window.location.href.split('?')[0] + '?font=' + encodeURIComponent(fontUrl);
-                        const tweetText = encodeURIComponent(`Check out this font: ${fontName} on the Boabro Font Inspector Tool`);
-                        window.open(`https://twitter.com/intent/tweet?text=${tweetText}&url=${encodeURIComponent(shareUrl)}`, 
-                                    '_blank');
-                    }
-                }
-                """)
+                # Basic info
+                with t.div(class_="notification is-light"):
+                    t.pre(self.state["info"])
                 
                 # Reset button
                 with t.div(class_="field mt-3"):
                     t.button("Reset", class_="button is-light", on_click=self.on_reset_click)
+        
+        # Error message
+        if self.state["error"]:
+            with t.div(class_="notification is-danger mt-4"):
+                t.p(self.state["error"])
 
     def attached(self):
         debug_log("Setting up file change handler")
@@ -962,10 +784,6 @@ class FontInspector(Page):
         except Exception as e:
             debug_log(f"Error processing URL parameters: {str(e)}")
             debug_log(traceback.format_exc())
-
-    def set_active_tab(self, tab_name):
-        debug_log(f"Setting active tab to: {tab_name}")
-        self.state["active_tab"] = tab_name
 
     def on_preview_text_change(self, event):
         self.state["preview_text"] = event.target.value
@@ -1286,12 +1104,6 @@ class FontInspector(Page):
             font = TTFont(font_data)
             debug_log("Font loaded successfully")
             
-            # Update loading message
-            try:
-                window.showLoading("Extracting font metadata...")
-            except:
-                pass
-            
             # Extract name table
             names = font["name"]
             
@@ -1313,95 +1125,25 @@ class FontInspector(Page):
                 f"Version: {get_name(5)}",
                 f"PostScript Name: {get_name(6)}",
                 f"Units Per Em: {font['head'].unitsPerEm}",
-                f"Created: {font['head'].created}",
-                f"Modified: {font['head'].modified}",
                 f"Tables: {', '.join(sorted(font.keys()))}",
                 f"Number of Glyphs: {len(font.getGlyphOrder())}",
             ]
             
-            # Try to update loading message
-            try:
-                window.showLoading("Analyzing font tables and features...")
-            except:
-                pass
-                
-            # Detailed info for tabs
-            detailed_info = {
-                "tables": {},
-                "features": {}
-            }
-            
-            # Get table info
-            for tag in sorted(font.keys()):
-                table = font[tag]
-                if hasattr(table, "__dict__"):
-                    attrs = [attr for attr in dir(table) if not attr.startswith("_") and not callable(getattr(table, attr))]
-                    if attrs:
-                        description = ", ".join([f"{attr}: {getattr(table, attr)}" for attr in attrs[:5]])
-                        detailed_info["tables"][tag] = description
-                    else:
-                        detailed_info["tables"][tag] = "Table present but no readable attributes"
-                else:
-                    detailed_info["tables"][tag] = "Table present"
-            
-            # Get OpenType features if available
-            if "GSUB" in font:
-                try:
-                    gsub = font["GSUB"].table
-                    features = {}
-                    for feature in gsub.FeatureList.FeatureRecord:
-                        tag = feature.FeatureTag
-                        features[tag] = "OpenType feature present"
-                    detailed_info["features"]["GSUB"] = features
-                except Exception as e:
-                    debug_log(f"Error extracting GSUB features: {str(e)}")
-            
-            if "GPOS" in font:
-                try:
-                    gpos = font["GPOS"].table
-                    features = {}
-                    for feature in gpos.FeatureList.FeatureRecord:
-                        tag = feature.FeatureTag
-                        features[tag] = "OpenType feature present"
-                    detailed_info["features"]["GPOS"] = features
-                except Exception as e:
-                    debug_log(f"Error extracting GPOS features: {str(e)}")
-            
             # Update state with info
             self.state["info"] = "\n".join(info)
-            self.state["detailed_info"] = detailed_info
             self.state["error"] = ""
             self.state["font_loaded"] = True
             debug_log("Font info extracted")
             
-            # Try to update loading message
-            try:
-                window.showLoading("Preparing font preview...")
-            except:
-                pass
-                
             # Add font-face for preview
             self.add_font_face(self.state["file_data"], self.state["font_name"])
             
-            # Hide loading animation
-            try:
-                window.hideLoading()
-            except:
-                pass
-                
         except Exception as e:
             error_msg = f"Error processing font: {str(e)}"
             debug_log(error_msg)
             debug_log(traceback.format_exc())
             self.state["error"] = error_msg
             self.state["font_loaded"] = False
-            
-            # Hide loading animation and show error
-            try:
-                window.hideLoading()
-                window.showErrorModal(error_msg)
-            except Exception as modal_error:
-                debug_log(f"Error showing error modal: {str(modal_error)}")
         finally:
             self.state["is_processing"] = False
 

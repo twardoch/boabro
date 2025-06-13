@@ -1,0 +1,132 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Font Inspector (Mako)</title>
+    <link rel="stylesheet" href="https://pyscript.net/releases/2025.3.1/core.css">
+    <script type="module" src="https://pyscript.net/releases/2025.3.1/core.js"></script>
+
+    <!--  MAKO TEMPLATE -->
+    <script type="text/x-mako" id="font-template">
+        <div>
+            <input type="file" id="font-upload" accept=".ttf,.otf">
+            <button id="process-btn">Process Font</button>
+        </div>
+
+        % if error:
+            <div style="color:red;">Error: ${error}</div>
+        % endif
+
+        % if info:
+            <pre>${info}</pre>
+        % endif
+
+        <div id="debug" style="border:1px solid gray; padding:5px; max-height:200px; overflow-y:scroll;"></div>
+    </script>
+
+    <!-- PyScript Code -->
+    <script type="py" config='{"packages":["mako","fonttools"]}'>
+from mako.template import Template
+from js import document, console
+from pyodide.ffi import create_proxy
+import io, traceback
+
+# Debug logging (simplified)
+def debug_log(message):
+    debug_div = document.getElementById("debug")
+    if debug_div:
+        log_entry = document.createElement('div')
+        log_entry.innerText = str(message)
+        debug_div.appendChild(log_entry)
+        debug_div.scrollTop = debug_div.scrollHeight  # Auto-scroll
+    console.log(message)
+
+# --- Font Processing ---
+async def process_font(font_data):
+    debug_log("Processing font data...")
+    try:
+        from fontTools.ttLib import TTFont
+        font = TTFont(io.BytesIO(font_data))
+        names = font["name"]
+
+        def get_name(nameID):
+            entry = names.getName(nameID, 3, 1, 0x409) or names.getName(
+                nameID, 1, 0, 0
+            )
+            return entry.toStr() if entry else "(N/A)"
+
+        info = [
+            f"Family Name: {get_name(1)}",
+            f"Subfamily: {get_name(2)}",
+            f"Full Name: {get_name(4)}",
+            f"Units Per Em: {font['head'].unitsPerEm}",
+            f"Tables: {', '.join(sorted(font.keys()))}",
+            f"Number of Glyphs: {len(font.getGlyphOrder())}",
+        ]
+        return "\n".join(info), ""  # Success: return info, no error
+    except Exception as e:
+        error_msg = f"Error processing font: {str(e)}"
+        debug_log(error_msg)
+        debug_log(traceback.format_exc())
+        return "", error_msg  # Failure: return no info, error message
+
+# --- Event Handlers ---
+async def process_file_click(event):
+    debug_log("Process button clicked")
+    upload = document.getElementById("font-upload")
+    if upload.files and upload.files.length > 0:
+        file = upload.files.item(0)
+        try:
+            array_buffer = await file.arrayBuffer()
+            font_data = array_buffer.to_bytes()
+            info, error = await process_font(font_data) # process_font is now async.
+            render_template(info, error) # Call render, now that we have results
+        except Exception as e:
+            debug_log(f"Error reading file: {str(e)}")
+            render_template("", f"Error reading file: {str(e)}")  # Update UI
+    else:
+        debug_log("No file selected")
+        render_template("", "No file selected.") #Update UI
+
+
+def render_template(info, error):
+    """Renders the Mako template and updates the page."""
+
+    template_str = document.getElementById("font-template").textContent
+    template = Template(template_str)
+    html = template.render(info=info, error=error)
+    
+    content_div = document.getElementById("content")
+    if not content_div:
+        content_div = document.createElement("div")
+        content_div.id = "content"
+        document.body.appendChild(content_div)
+    
+    content_div.innerHTML = html
+
+    # Reattach event listener.  CRITICAL.
+    upload_button = document.getElementById("font-upload")
+    if upload_button:
+         upload_button.addEventListener("change", file_selected_proxy)
+
+
+
+# --- Setup (Event Listeners, Initial Render) ---
+
+# Set up the proxy *once*.  This is important.
+file_selected_proxy = create_proxy(process_file_click)
+
+
+# Initial render.
+render_template("", "")
+
+# Do NOT call process_file_click directly here.  The file input
+# isn't ready yet, and it won't have any files. The initial render
+# creates the file input, _then_ we add the listener.
+
+</script>
+</head>
+<body>
+</body>
+</html>

@@ -1,0 +1,311 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Python Font Inspector - Tailwind</title>
+  <script src="https://cdn.tailwindcss.com"></script>
+  <script src="https://cdn.jsdelivr.net/pyodide/v0.23.4/full/pyodide.js"></script>
+</head>
+<body class="bg-gray-100 min-h-screen">
+  <div class="container mx-auto px-4 py-8">
+    <header class="bg-blue-600 text-white p-4 rounded-lg shadow-lg mb-6">
+      <h1 class="text-2xl font-bold">Font Inspector</h1>
+      <p class="text-sm">Analyze TTF and OTF fonts in your browser</p>
+    </header>
+    
+    <main class="bg-white p-6 rounded-lg shadow-lg">
+      <div id="app" class="space-y-6">
+        <div class="animate-pulse flex space-x-4">
+          <div class="flex-1 space-y-4 py-1">
+            <div class="h-4 bg-gray-200 rounded w-3/4"></div>
+            <div class="space-y-2">
+              <div class="h-4 bg-gray-200 rounded"></div>
+              <div class="h-4 bg-gray-200 rounded w-5/6"></div>
+            </div>
+          </div>
+        </div>
+        <p class="text-center text-gray-500">Loading Python environment...</p>
+      </div>
+    </main>
+    
+    <div id="output" class="mt-6 bg-white p-6 rounded-lg shadow-lg hidden">
+      <h2 class="text-xl font-semibold mb-4">Font Information</h2>
+      <pre id="result" class="bg-gray-100 p-4 rounded overflow-auto max-h-96"></pre>
+    </div>
+  </div>
+
+  <script>
+    async function main() {
+      // Initialize Pyodide
+      const pyodide = await loadPyodide();
+      await pyodide.loadPackage("fonttools");
+      
+      // Define the app HTML
+      const appHTML = `
+        <div class="space-y-6">
+          <div class="flex space-x-4">
+            <div class="w-1/2">
+              <label for="font-file" class="block text-sm font-medium text-gray-700">Upload Font File</label>
+              <div class="mt-1 flex items-center">
+                <input id="font-file" type="file" accept=".ttf,.otf" class="block w-full text-sm text-gray-500
+                  file:mr-4 file:py-2 file:px-4
+                  file:rounded-md file:border-0
+                  file:text-sm file:font-semibold
+                  file:bg-blue-50 file:text-blue-700
+                  hover:file:bg-blue-100">
+              </div>
+              <p class="mt-2 text-sm text-gray-500">Select a TTF or OTF font file to analyze</p>
+            </div>
+            
+            <div class="w-1/2">
+              <label for="font-url" class="block text-sm font-medium text-gray-700">Font URL</label>
+              <div class="mt-1">
+                <input id="font-url" type="url" class="shadow-sm focus:ring-blue-500 focus:border-blue-500 block w-full sm:text-sm border-gray-300 rounded-md" 
+                  placeholder="https://example.com/font.ttf" 
+                  value="https://github.com/google/fonts/raw/refs/heads/main/ofl/abrilfatface/AbrilFatface-Regular.ttf">
+              </div>
+              <p class="mt-2 text-sm text-gray-500">Or provide a URL to a TTF or OTF font</p>
+            </div>
+          </div>
+          
+          <div class="flex items-center space-x-4">
+            <button id="analyze-btn" class="inline-flex items-center px-4 py-2 border border-transparent text-sm font-medium rounded-md shadow-sm text-white bg-blue-600 hover:bg-blue-700 focus:outline-none focus:ring-2 focus:ring-offset-2 focus:ring-blue-500">
+              <span id="spinner" class="hidden mr-2">
+                <svg class="animate-spin h-4 w-4 text-white" xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24">
+                  <circle class="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" stroke-width="4"></circle>
+                  <path class="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4zm2 5.291A7.962 7.962 0 014 12H0c0 3.042 1.135 5.824 3 7.938l3-2.647z"></path>
+                </svg>
+              </span>
+              Analyze Font
+            </button>
+            <p id="status" class="text-sm text-gray-500"></p>
+          </div>
+          
+          <div id="error" class="hidden bg-red-50 border-l-4 border-red-400 p-4">
+            <div class="flex">
+              <div class="flex-shrink-0">
+                <svg class="h-5 w-5 text-red-400" xmlns="http://www.w3.org/2000/svg" viewBox="0 0 20 20" fill="currentColor">
+                  <path fill-rule="evenodd" d="M10 18a8 8 0 100-16 8 8 0 000 16zM8.707 7.293a1 1 0 00-1.414 1.414L8.586 10l-1.293 1.293a1 1 0 101.414 1.414L10 11.414l1.293 1.293a1 1 0 001.414-1.414L11.414 10l1.293-1.293a1 1 0 00-1.414-1.414L10 8.586 8.707 7.293z" clip-rule="evenodd" />
+                </svg>
+              </div>
+              <div class="ml-3">
+                <p id="error-message" class="text-sm text-red-700"></p>
+              </div>
+            </div>
+          </div>
+        </div>
+      `;
+      
+      // Update the app container
+      document.getElementById('app').innerHTML = appHTML;
+      
+      // Set up the analyze button
+      document.getElementById('analyze-btn').addEventListener('click', async () => {
+        const fileInput = document.getElementById('font-file');
+        const urlInput = document.getElementById('font-url');
+        const spinner = document.getElementById('spinner');
+        const status = document.getElementById('status');
+        const error = document.getElementById('error');
+        const errorMessage = document.getElementById('error-message');
+        
+        // Hide previous error and result
+        error.classList.add('hidden');
+        document.getElementById('output').classList.add('hidden');
+        
+        // Check if either file or URL is provided
+        if (!fileInput.files.length && !urlInput.value) {
+          error.classList.remove('hidden');
+          errorMessage.textContent = 'Please select a font file or provide a URL';
+          return;
+        }
+        
+        // Show spinner and disable button
+        spinner.classList.remove('hidden');
+        document.getElementById('analyze-btn').disabled = true;
+        status.textContent = 'Processing...';
+        
+        try {
+          let fontData;
+          
+          if (fileInput.files.length) {
+            // Process file
+            status.textContent = 'Reading file...';
+            const file = fileInput.files[0];
+            const arrayBuffer = await file.arrayBuffer();
+            fontData = new Uint8Array(arrayBuffer);
+          } else {
+            // Process URL
+            status.textContent = 'Fetching font from URL...';
+            
+            // Set up Python for URL fetching
+            await pyodide.runPythonAsync(`
+              import pyodide.http
+              import traceback
+              
+              async def fetch_font_from_url(url):
+                  try:
+                      # Use custom headers to avoid CORS issues
+                      headers = {
+                          "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/91.0.4472.124 Safari/537.36",
+                          "Accept": "*/*",
+                          "Accept-Language": "en-US,en;q=0.9",
+                          "Referer": "https://example.com/",
+                          "Origin": "https://example.com"
+                      }
+                      
+                      # List of CORS proxies to try
+                      cors_proxies = [
+                          "https://corsproxy.io/?url=",
+                          "https://api.allorigins.win/raw?url=",
+                          "https://cors.eu.org/",
+                          "https://xofix.4kb.dev/?url="
+                      ]
+                      
+                      # If it's a GitHub URL, try to use a more direct approach first
+                      if "github.com" in url:
+                          # Try to convert to raw.githubusercontent.com if not already
+                          if "raw.githubusercontent.com" not in url:
+                              # Convert github.com URL to raw.githubusercontent.com
+                              raw_url = url.replace("github.com", "raw.githubusercontent.com")
+                              raw_url = raw_url.replace("/blob/", "/")
+                              print(f"Converted to raw URL: {raw_url}")
+                              try:
+                                  response = await pyodide.http.pyfetch(raw_url, headers=headers)
+                                  if response.status == 200:
+                                      return await response.bytes()
+                              except Exception as raw_error:
+                                  print(f"Raw URL request failed: {str(raw_error)}")
+                      
+                      # Try each CORS proxy in sequence
+                      for proxy in cors_proxies:
+                          proxy_url = f"{proxy}{url}"
+                          print(f"Trying CORS proxy: {proxy}")
+                          try:
+                              response = await pyodide.http.pyfetch(proxy_url, headers=headers)
+                              if response.status == 200:
+                                  return await response.bytes()
+                          except Exception as proxy_error:
+                              print(f"Proxy {proxy} request failed: {str(proxy_error)}")
+                      
+                      # Try direct URL as fallback
+                      print("Trying direct URL request")
+                      try:
+                          response = await pyodide.http.pyfetch(url, headers=headers)
+                          if response.status == 200:
+                              return await response.bytes()
+                      except Exception as direct_error:
+                          print(f"Direct request failed: {str(direct_error)}")
+                      
+                      # Try with no-cors mode as a last resort
+                      print("Attempting with no-cors mode")
+                      try:
+                          response = await pyodide.http.pyfetch(url, headers=headers, mode="no-cors")
+                          return await response.bytes()
+                      except Exception as no_cors_error:
+                          print(f"No-cors request failed: {str(no_cors_error)}")
+                      
+                      # If we got here, all attempts failed
+                      print("All fetch attempts failed")
+                      return None
+                  except Exception as e:
+                      print(f"Error fetching font: {str(e)}")
+                      print(traceback.format_exc())
+                      return None
+            `);
+            
+            // Fetch the font from URL
+            const url = urlInput.value;
+            pyodide.globals.set('url', url);
+            fontData = await pyodide.runPythonAsync('await fetch_font_from_url(url)');
+            
+            if (!fontData) {
+              throw new Error('Failed to fetch font from URL. CORS policy may be blocking the request.');
+            }
+          }
+          
+          // Pass the font data to Python
+          pyodide.globals.set('font_data', fontData);
+          status.textContent = 'Analyzing font...';
+          
+          // Run the Python code to analyze the font
+          const result = await pyodide.runPythonAsync(`
+            import io
+            from fontTools.ttLib import TTFont
+            
+            # Load the font from the byte data
+            font_io = io.BytesIO(font_data)
+            font = TTFont(font_io)
+            
+            # Get UPM value
+            upm = font["head"].unitsPerEm
+            
+            # Get name table entries
+            name_table = font["name"]
+            
+            # Helper to get name
+            def get_name(nameID):
+                entry = name_table.getName(nameID, 3, 1, 0x409) or name_table.getName(nameID, 1, 0, 0)
+                return entry.toUnicode() if entry else "(N/A)"
+            
+            # Create a list to store the name table data
+            name_data = []
+            
+            for record in name_table.names:
+                try:
+                    name_id = record.nameID
+                    platform_id = record.platformID
+                    string = record.toUnicode()
+                    name_data.append({"Name ID": name_id, "Platform ID": platform_id, "String": string})
+                except:
+                    name_data.append({"Name ID": record.nameID, "Platform ID": record.platformID, "String": "(could not decode)"})
+            
+            # Format the output as text
+            output = f"""
+## Font Information
+
+### Basic Information
+- **Family Name:** {get_name(1)}
+- **Subfamily:** {get_name(2)}
+- **Full Name:** {get_name(4)}
+- **Version:** {get_name(5)}
+- **Units Per Em (UPM):** {upm}
+- **Number of Glyphs:** {len(font.getGlyphOrder())}
+
+### Available Tables
+{", ".join(sorted(font.keys()))}
+
+### Name Table Entries
+
+| Name ID | Platform ID | String |
+|---------|-------------|--------|
+"""
+            
+            # Add table rows
+            for entry in name_data:
+                output += f"| {entry['Name ID']} | {entry['Platform ID']} | {entry['String']} |\\n"
+                
+            output
+          `);
+          
+          // Display the result
+          document.getElementById('result').textContent = result;
+          document.getElementById('output').classList.remove('hidden');
+          status.textContent = 'Font analyzed successfully!';
+        } catch (error) {
+          console.error('Error:', error);
+          error.classList.remove('hidden');
+          errorMessage.textContent = `Error analyzing font: ${error.message}`;
+          status.textContent = 'Error occurred';
+        } finally {
+          // Hide spinner and enable button
+          spinner.classList.add('hidden');
+          document.getElementById('analyze-btn').disabled = false;
+        }
+      });
+    }
+    
+    main();
+  </script>
+</body>
+</html>

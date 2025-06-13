@@ -1,0 +1,291 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>PyScript with Vue.js</title>
+  <script src="https://unpkg.com/vue@3/dist/vue.global.js"></script>
+  <link rel="stylesheet" href="https://pyscript.net/releases/2025.3.1/core.css">
+  <script type="module" src="https://pyscript.net/releases/2025.3.1/core.js"></script>
+  <style>
+    body { font-family: Arial, sans-serif; margin: 0; padding: 20px; }
+    .container { max-width: 800px; margin: 0 auto; }
+    .card { border: 1px solid #ddd; border-radius: 8px; padding: 20px; margin-bottom: 20px; }
+    .result { background-color: #f5f5f5; padding: 15px; border-radius: 4px; white-space: pre-wrap; }
+    .loading { display: flex; justify-content: center; align-items: center; height: 100px; }
+  </style>
+</head>
+<body>
+  <div id="app" class="container">
+    <h1>{{ title }}</h1>
+    
+    <div class="card">
+      <h2>Font Analyzer</h2>
+      <p>Upload a TTF or OTF font file to analyze its properties, or provide a URL.</p>
+      
+      <div style="margin-bottom: 15px;">
+        <label style="display: block; margin-bottom: 5px;">Font File:</label>
+        <input type="file" accept=".ttf,.otf" @change="handleFileChange" :disabled="isProcessing">
+        <div v-if="selectedFile" style="margin-top: 5px; font-size: 0.9em; color: #666;">
+          Selected file: {{ selectedFile.name }}
+        </div>
+      </div>
+      
+      <div style="margin-bottom: 15px;">
+        <label style="display: block; margin-bottom: 5px;">Font URL:</label>
+        <input 
+          type="url" 
+          v-model="fontUrl" 
+          placeholder="https://example.com/font.ttf"
+          style="width: 100%; padding: 8px; margin-bottom: 5px; box-sizing: border-box;"
+          :disabled="isProcessing"
+        >
+        <div style="font-size: 0.8em; color: #666;">
+          If both file and URL are provided, the file will be used.
+        </div>
+      </div>
+      
+      <div>
+        <button 
+          @click="analyzeFontFile" 
+          :disabled="(!selectedFile && !fontUrl) || isProcessing"
+          style="padding: 8px 16px; background-color: #4CAF50; color: white; border: none; border-radius: 4px; cursor: pointer;">
+          {{ isProcessing ? 'Processing...' : 'Analyze Font' }}
+        </button>
+      </div>
+    </div>
+    
+    <div v-if="isProcessing" class="loading">
+      <div>Processing font file...</div>
+    </div>
+    
+    <div v-if="result" class="card">
+      <h2>Analysis Results</h2>
+      <div class="result" v-html="formattedResult"></div>
+    </div>
+  </div>
+
+  <py-config>
+    packages = ["fonttools"]
+  </py-config>
+  
+  <py-script>
+from fontTools.ttLib import TTFont
+import io
+import js
+import pyodide.http
+
+async def fetch_font_from_url(url):
+    try:
+        # Add custom headers to help with CORS issues
+        headers = {
+            "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/91.0.4472.124 Safari/537.36",
+            "Accept": "*/*",
+            "Accept-Language": "en-US,en;q=0.9"
+        }
+        
+        # List of CORS proxies to try
+        cors_proxies = [
+            "https://corsproxy.io/?url=",
+            "https://api.allorigins.win/raw?url=",
+            "https://cors.eu.org/",
+            "https://xofix.4kb.dev/?url="
+        ]
+
+        
+        # If it's a GitHub URL, try to use a more direct approach first
+        if "github.com" in url and "raw" in url:
+            # Try to convert to raw.githubusercontent.com if not already
+            if "raw.githubusercontent.com" not in url:
+                # Convert github.com URL to raw.githubusercontent.com
+                raw_url = url.replace("github.com", "raw.githubusercontent.com")
+                raw_url = raw_url.replace("/blob/", "/")
+                print(f"Converted to raw URL: {raw_url}")
+                try:
+                    response = await pyodide.http.pyfetch(raw_url, headers=headers)
+                    if response.status == 200:
+                        return await response.bytes()
+                except Exception as raw_error:
+                    print(f"Raw URL request failed: {str(raw_error)}")
+        
+        # Try each CORS proxy in sequence
+        for proxy in cors_proxies:
+            proxy_url = f"{proxy}{url}"
+            print(f"Trying CORS proxy: {proxy}")
+            try:
+                response = await pyodide.http.pyfetch(proxy_url, headers=headers)
+                if response.status == 200:
+                    return await response.bytes()
+                else:
+                    print(f"Proxy {proxy} request failed with status: {response.status}")
+            except Exception as proxy_error:
+                print(f"Proxy {proxy} request failed: {str(proxy_error)}")
+        
+        # Try direct URL as fallback
+        print("Trying direct URL request")
+        response = await pyodide.http.pyfetch(url, headers=headers)
+        if response.status == 200:
+            return await response.bytes()
+        else:
+            print(f"Direct request failed with status: {response.status}")
+            
+            # Try with no-cors mode as a last resort
+            print("Attempting with no-cors mode")
+            try:
+                response = await pyodide.http.pyfetch(url, headers=headers, mode="no-cors")
+                return await response.bytes()
+            except Exception as no_cors_error:
+                print(f"No-cors request failed: {str(no_cors_error)}")
+        
+        # If we got here, all attempts failed
+        print("All fetch attempts failed")
+        return None
+    except Exception as e:
+        print(f"Error fetching font: {str(e)}")
+        return None
+
+def analyze_font(font_data):
+    # Load the font from bytes
+    font_io = io.BytesIO(font_data)
+    font = TTFont(font_io)
+    
+    # Get UPM value
+    upm = font["head"].unitsPerEm
+    
+    # Get name table entries
+    name_table = font["name"]
+    
+    # Helper to get name
+    def get_name(nameID):
+        entry = name_table.getName(nameID, 3, 1, 0x409) or name_table.getName(nameID, 1, 0, 0)
+        return entry.toUnicode() if entry else "(N/A)"
+    
+    # Create a list to store the name table data
+    name_data = []
+    
+    for record in name_table.names:
+        try:
+            name_id = record.nameID
+            platform_id = record.platformID
+            string = record.toUnicode()
+            name_data.append({"Name ID": name_id, "Platform ID": platform_id, "String": string})
+        except:
+            name_data.append({"Name ID": record.nameID, "Platform ID": record.platformID, "String": "(could not decode)"})
+    
+    # Format the output as HTML
+    output = f"""
+<h3>Font Information</h3>
+<p><strong>Family Name:</strong> {get_name(1)}</p>
+<p><strong>Subfamily:</strong> {get_name(2)}</p>
+<p><strong>Full Name:</strong> {get_name(4)}</p>
+<p><strong>Units Per Em (UPM):</strong> {upm}</p>
+<p><strong>Number of Glyphs:</strong> {len(font.getGlyphOrder())}</p>
+
+<h3>Name Table Entries</h3>
+<table border='1' cellpadding='5' style='border-collapse: collapse; width: 100%;'>
+  <tr>
+    <th>Name ID</th>
+    <th>Platform ID</th>
+    <th>String</th>
+  </tr>
+"""
+    
+    # Add table rows
+    for entry in name_data:
+        output += f"""
+  <tr>
+    <td>{entry['Name ID']}</td>
+    <td>{entry['Platform ID']}</td>
+    <td>{entry['String']}</td>
+  </tr>"""
+    
+    output += "</table>"
+    return output
+
+# Function to be called from JavaScript for uploaded files
+def process_font(font_data_js):
+    try:
+        # Convert JS Uint8Array to Python bytes
+        font_data = bytes(font_data_js.to_py())
+        result = analyze_font(font_data)
+        return result
+    except Exception as e:
+        return f"<p class='error'>Error analyzing font: {str(e)}</p>"
+
+# Function to be called from JavaScript for URLs
+async def process_font_url(url):
+    try:
+        font_data = await fetch_font_from_url(url)
+        if font_data:
+            result = analyze_font(font_data)
+            return result
+        else:
+            return "<p class='error'>Error fetching font from URL</p>"
+    except Exception as e:
+        return f"<p class='error'>Error processing font URL: {str(e)}</p>"
+  </py-script>
+
+  <script>
+    const { createApp, ref, computed } = Vue
+    
+    createApp({
+      setup() {
+        const title = ref('PyScript with Vue.js')
+        const selectedFile = ref(null)
+        const fontUrl = ref('https://github.com/google/fonts/raw/refs/heads/main/ofl/abrilfatface/AbrilFatface-Regular.ttf')
+        const isProcessing = ref(false)
+        const result = ref('')
+        
+        const handleFileChange = (event) => {
+          selectedFile.value = event.target.files[0]
+          result.value = ''
+        }
+        
+        const analyzeFontFile = async () => {
+          // Check if either file or URL is available
+          if (!selectedFile.value && !fontUrl.value) return
+          
+          isProcessing.value = true
+          result.value = ''
+          
+          try {
+            const pyodide = await pyscript.interpreter
+            
+            // Prefer file over URL if both are provided
+            if (selectedFile.value) {
+              // Process the uploaded file
+              const arrayBuffer = await selectedFile.value.arrayBuffer()
+              const fontData = new Uint8Array(arrayBuffer)
+              
+              // Call the Python function for file
+              result.value = await pyodide.globals.get('process_font')(fontData)
+            } else if (fontUrl.value) {
+              // Process the URL
+              result.value = await pyodide.globals.get('process_font_url')(fontUrl.value)
+            }
+          } catch (error) {
+            result.value = `<p class="error">Error: ${error.message}</p>`
+          } finally {
+            isProcessing.value = false
+          }
+        }
+        
+        const formattedResult = computed(() => {
+          return result.value
+        })
+        
+        return {
+          title,
+          selectedFile,
+          fontUrl,
+          isProcessing,
+          result,
+          formattedResult,
+          handleFileChange,
+          analyzeFontFile
+        }
+      }
+    }).mount('#app')
+  </script>
+</body>
+</html>

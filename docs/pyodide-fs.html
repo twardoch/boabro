@@ -1,0 +1,629 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Font Inspector with File System</title>
+  <link href="https://cdn.jsdelivr.net/npm/bootstrap@5.3.2/dist/css/bootstrap.min.css" rel="stylesheet">
+  <script src="https://cdn.jsdelivr.net/pyodide/v0.23.4/full/pyodide.js"></script>
+  <style>
+    #output {
+      white-space: pre-wrap;
+      background-color: #f8f9fa;
+      border-radius: 6px;
+      padding: 15px;
+      font-family: monospace;
+      max-height: 500px;
+      overflow-y: auto;
+    }
+    .debug-info {
+      background-color: #f8f9fa;
+      border: 1px solid #dee2e6;
+      border-radius: 0.25rem;
+      padding: 1rem;
+      margin-top: 1rem;
+      font-family: monospace;
+      font-size: 0.875rem;
+      max-height: 200px;
+      overflow-y: auto;
+    }
+    .spinner-border {
+      display: inline-block;
+      width: 1rem;
+      height: 1rem;
+      margin-right: 0.5rem;
+      vertical-align: text-bottom;
+      border: 0.2em solid currentColor;
+      border-right-color: transparent;
+      border-radius: 50%;
+      animation: spinner-border .75s linear infinite;
+    }
+    @keyframes spinner-border {
+      to { transform: rotate(360deg); }
+    }
+  </style>
+</head>
+<body>
+  <div class="container py-4">
+    <h1 class="mb-4">Font Inspector with File System</h1>
+    
+    <div class="card mb-4">
+      <div class="card-body">
+        <h5 class="card-title">Upload Font File</h5>
+        <p class="card-text">Select a TTF or OTF font file to analyze.</p>
+        
+        <div class="mb-3">
+          <input type="file" class="form-control" id="font-file" accept=".ttf,.otf">
+        </div>
+        
+        <div class="mb-3">
+          <label for="font-url" class="form-label">Font URL:</label>
+          <input type="url" class="form-control" id="font-url" 
+                 value="https://github.com/google/fonts/raw/refs/heads/main/ofl/abrilfatface/AbrilFatface-Regular.ttf"
+                 placeholder="https://example.com/font.ttf">
+          <div class="form-text">If both file and URL are provided, the file will be used.</div>
+        </div>
+        
+        <div class="mb-3">
+          <label for="font-name" class="form-label">Save As (optional):</label>
+          <input type="text" class="form-control" id="font-name" placeholder="Enter a name to save this font">
+        </div>
+        
+        <button class="btn btn-primary" id="analyze-btn" disabled>
+          <span id="spinner" class="spinner-border" style="display: none;"></span>
+          Analyze Font
+        </button>
+      </div>
+    </div>
+    
+    <div id="status" class="alert alert-info">Loading Python environment...</div>
+    
+    <div class="row">
+      <div class="col-md-6">
+        <div class="card mb-4">
+          <div class="card-header">
+            <h5 class="mb-0">Saved Fonts</h5>
+          </div>
+          <div class="card-body">
+            <ul class="list-group" id="saved-fonts-list">
+              <li class="list-group-item">No saved fonts yet.</li>
+            </ul>
+          </div>
+        </div>
+      </div>
+      
+      <div class="col-md-6">
+        <div class="card mb-4">
+          <div class="card-header">
+            <h5 class="mb-0">Font Info</h5>
+          </div>
+          <div class="card-body">
+            <div id="output">Select a font to analyze.</div>
+          </div>
+        </div>
+      </div>
+    </div>
+    
+    <!-- Debug information section (hidden by default) -->
+    <div id="debug-container" class="mt-4" style="display: none;">
+      <div class="card">
+        <div class="card-header d-flex justify-content-between align-items-center">
+          <h5 class="mb-0">Debug Information</h5>
+          <button class="btn btn-sm btn-outline-secondary" onclick="toggleDebug()">Hide</button>
+        </div>
+        <div class="card-body">
+          <div id="debug-info" class="debug-info"></div>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <script>
+    // Global variables
+    let pyodide;
+    let fontFS = {};
+    const fontFileInput = document.getElementById('font-file');
+    const fontUrlInput = document.getElementById('font-url');
+    const fontNameInput = document.getElementById('font-name');
+    const analyzeButton = document.getElementById('analyze-btn');
+    const outputElement = document.getElementById('output');
+    const savedFontsList = document.getElementById('saved-fonts-list');
+    const statusElement = document.getElementById('status');
+    const spinner = document.getElementById('spinner');
+    const debugInfo = document.getElementById('debug-info');
+    
+    // Debug functions
+    function showDebug() {
+      document.getElementById('debug-container').style.display = 'block';
+    }
+    
+    function toggleDebug() {
+      const debugContainer = document.getElementById('debug-container');
+      debugContainer.style.display = debugContainer.style.display === 'none' ? 'block' : 'none';
+    }
+    
+    function logToDebug(message) {
+      console.log(message);
+      if (debugInfo) {
+        debugInfo.innerHTML += `<div>[JS] ${message}</div>`;
+        debugInfo.scrollTop = debugInfo.scrollHeight;
+      }
+    }
+    
+    // Initialize Pyodide
+    async function initPyodide() {
+      statusElement.textContent = 'Loading Python environment...';
+      logToDebug('Initializing Pyodide...');
+      
+      try {
+        pyodide = await loadPyodide();
+        logToDebug('Pyodide loaded, loading fonttools package...');
+        await pyodide.loadPackage(['fonttools']);
+        logToDebug('Fonttools package loaded, setting up Python environment...');
+        
+        // Setup the Python environment
+        await pyodide.runPythonAsync(`
+          import os
+          import io
+          import json
+          import sys
+          import traceback
+          from fontTools.ttLib import TTFont
+          from pyodide.ffi import to_js
+          from js import console, document
+          
+          # Setup logging to JavaScript
+          def log_to_js(message):
+              console.log(f"[Python] {message}")
+              debug_div = document.getElementById("debug-info")
+              if debug_div:
+                  debug_div.innerHTML += f"<div>[Python] {message}</div>"
+                  debug_div.scrollTop = debug_div.scrollHeight
+          
+          # Create fonts directory if it doesn't exist
+          if not os.path.exists('/fonts'):
+              os.makedirs('/fonts')
+              log_to_js("Created /fonts directory")
+          
+          def analyze_font(font_data, save_name=None):
+              try:
+                  log_to_js(f"Analyzing font data ({len(font_data)} bytes)")
+                  
+                  # Load the font from bytes
+                  font_io = io.BytesIO(font_data)
+                  font = TTFont(font_io)
+                  
+                  # If save_name is provided, save the font to the filesystem
+                  if save_name:
+                      font_path = f"/fonts/{save_name}.ttf"
+                      log_to_js(f"Saving font to {font_path}")
+                      with open(font_path, 'wb') as f:
+                          f.write(font_data)
+                  
+                  # Get UPM value
+                  upm = font["head"].unitsPerEm
+                  
+                  # Get name table entries
+                  name_table = font["name"]
+                  
+                  # Helper to get name
+                  def get_name(nameID):
+                      entry = name_table.getName(nameID, 3, 1, 0x409) or name_table.getName(nameID, 1, 0, 0)
+                      return entry.toUnicode() if entry else "(N/A)"
+                  
+                  family_name = get_name(1)
+                  log_to_js(f"Font family name: {family_name}")
+                  
+                  # Format output text
+                  output = []
+                  output.append("Font Information:\\n")
+                  output.append(f"Family Name: {get_name(1)}")
+                  output.append(f"Subfamily: {get_name(2)}")
+                  output.append(f"Full Name: {get_name(4)}")
+                  output.append(f"Version: {get_name(5)}")
+                  output.append(f"Units Per Em (UPM): {upm}")
+                  output.append(f"Number of Glyphs: {len(font.getGlyphOrder())}")
+                  
+                  output.append("\\nAvailable Tables:")
+                  for table in sorted(font.keys()):
+                      output.append(f"- {table}")
+                  
+                  output.append("\\nName Table Entries:")
+                  for record in name_table.names:
+                      try:
+                          name_id = record.nameID
+                          platform_id = record.platformID
+                          string = record.toUnicode()
+                          output.append(f"ID: {name_id}, Platform: {platform_id}, String: {string}")
+                      except Exception as e:
+                          output.append(f"ID: {record.nameID}, Platform: {record.platformID}, String: (could not decode: {str(e)})")
+                  
+                  # Return metadata for storage
+                  metadata = {
+                      "familyName": get_name(1),
+                      "subfamily": get_name(2),
+                      "fullName": get_name(4),
+                      "version": get_name(5),
+                      "upm": upm,
+                      "numGlyphs": len(font.getGlyphOrder()),
+                      "tables": list(font.keys())
+                  }
+                  
+                  return {"text": "\\n".join(output), "metadata": metadata}
+              except Exception as e:
+                  error_details = traceback.format_exc()
+                  log_to_js(f"Error analyzing font: {str(e)}")
+                  log_to_js(f"Error details: {error_details}")
+                  return {
+                      "text": f"Error analyzing font: {str(e)}\\n\\nTraceback:\\n{error_details}",
+                      "metadata": None
+                  }
+          
+          def list_saved_fonts():
+              try:
+                  fonts = []
+                  if os.path.exists('/fonts'):
+                      for filename in os.listdir('/fonts'):
+                          if filename.endswith('.ttf') or filename.endswith('.otf'):
+                              font_path = f"/fonts/{filename}"
+                              font_name = os.path.splitext(filename)[0]
+                              fonts.append(font_name)
+                  log_to_js(f"Found {len(fonts)} saved fonts")
+                  return fonts
+              except Exception as e:
+                  error_details = traceback.format_exc()
+                  log_to_js(f"Error listing saved fonts: {str(e)}")
+                  log_to_js(f"Error details: {error_details}")
+                  return []
+          
+          def load_saved_font(font_name):
+              try:
+                  font_path = f"/fonts/{font_name}.ttf"
+                  log_to_js(f"Loading font from {font_path}")
+                  if os.path.exists(font_path):
+                      with open(font_path, 'rb') as f:
+                          font_data = f.read()
+                      log_to_js(f"Read {len(font_data)} bytes from {font_path}")
+                      return analyze_font(font_data)
+                  log_to_js(f"Font file not found: {font_path}")
+                  return {"text": f"Error: Font {font_name} not found", "metadata": None}
+              except Exception as e:
+                  error_details = traceback.format_exc()
+                  log_to_js(f"Error loading saved font: {str(e)}")
+                  log_to_js(f"Error details: {error_details}")
+                  return {
+                      "text": f"Error loading font {font_name}: {str(e)}\\n\\nTraceback:\\n{error_details}",
+                      "metadata": None
+                  }
+          
+          async def fetch_font_from_url(url):
+              import pyodide.http
+              
+              try:
+                  log_to_js(f"Fetching font from URL: {url}")
+                  
+                  # Use custom headers to avoid CORS issues
+                  headers = {
+                      "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/91.0.4472.124 Safari/537.36",
+                      "Accept": "*/*",
+                      "Accept-Language": "en-US,en;q=0.9",
+                      "Referer": "https://example.com/",
+                      "Origin": "https://example.com"
+                  }
+                  
+                  # List of CORS proxies to try
+                  cors_proxies = [
+                      "https://corsproxy.io/?url=",
+                      "https://api.allorigins.win/raw?url=",
+                      "https://cors.eu.org/",
+                      "https://xofix.4kb.dev/?url="
+                  ]
+
+                  font_data = None
+                  
+                  # If it's a GitHub URL, try to use a more direct approach first
+                  if "github.com" in url:
+                      # Try to convert to raw.githubusercontent.com if not already
+                      if "raw.githubusercontent.com" not in url:
+                          # Convert github.com URL to raw.githubusercontent.com
+                          raw_url = url.replace("github.com", "raw.githubusercontent.com")
+                          raw_url = raw_url.replace("/blob/", "/")
+                          log_to_js(f"Converted to raw URL: {raw_url}")
+                          try:
+                              response = await pyodide.http.pyfetch(raw_url, headers=headers)
+                              if response.status == 200:
+                                  font_data = await response.bytes()
+                                  log_to_js(f"Successfully fetched {len(font_data)} bytes from raw URL")
+                                  return font_data
+                          except Exception as raw_error:
+                              log_to_js(f"Raw URL request failed: {str(raw_error)}")
+                  
+                  # If we don't have font data yet, try CORS proxies
+                  if not font_data:
+                      # Try each CORS proxy in sequence
+                      for proxy in cors_proxies:
+                          proxy_url = f"{proxy}{url}"
+                          log_to_js(f"Trying CORS proxy: {proxy}")
+                          try:
+                              response = await pyodide.http.pyfetch(proxy_url, headers=headers)
+                              if response.status == 200:
+                                  font_data = await response.bytes()
+                                  log_to_js(f"Successfully fetched {len(font_data)} bytes via proxy: {proxy}")
+                                  return font_data
+                              else:
+                                  log_to_js(f"Proxy {proxy} request failed with status: {response.status}")
+                          except Exception as proxy_error:
+                              log_to_js(f"Proxy {proxy} request failed: {str(proxy_error)}")
+                  
+                  # If we still don't have font data, try direct URL as fallback
+                  if not font_data:
+                      log_to_js("Trying direct URL request")
+                      try:
+                          response = await pyodide.http.pyfetch(url, headers=headers)
+                          if response.status == 200:
+                              font_data = await response.bytes()
+                              log_to_js(f"Successfully fetched {len(font_data)} bytes from direct URL")
+                              return font_data
+                          else:
+                              log_to_js(f"Direct request failed with status: {response.status}")
+                      except Exception as direct_error:
+                          log_to_js(f"Direct request failed: {str(direct_error)}")
+                      
+                      # Try with no-cors mode as a last resort
+                      if not font_data:
+                          log_to_js("Attempting with no-cors mode")
+                          try:
+                              response = await pyodide.http.pyfetch(url, headers=headers, mode="no-cors")
+                              font_data = await response.bytes()
+                              log_to_js(f"Successfully fetched {len(font_data)} bytes with no-cors mode")
+                              return font_data
+                          except Exception as no_cors_error:
+                              log_to_js(f"No-cors request failed: {str(no_cors_error)}")
+                  
+                  # If we got here, all attempts failed
+                  if not font_data:
+                      log_to_js("All fetch attempts failed")
+                      raise Exception("Failed to fetch font. CORS policy may be blocking the request. Try downloading the font and uploading it directly.")
+                  
+                  return font_data
+              except Exception as e:
+                  error_details = traceback.format_exc()
+                  log_to_js(f"Error fetching font: {str(e)}")
+                  log_to_js(f"Error details: {error_details}")
+                  raise Exception(f"Failed to fetch font: {str(e)}")
+          
+          # Signal that Python is ready
+          log_to_js("Python environment setup complete")
+        `);
+        
+        analyzeButton.disabled = false;
+        statusElement.textContent = 'Python environment loaded. Select a font to analyze.';
+        statusElement.className = 'alert alert-success';
+        logToDebug('Python environment setup complete');
+        
+        // Update saved fonts list
+        updateSavedFontsList();
+      } catch (error) {
+        logToDebug(`Error initializing Pyodide: ${error.message}`);
+        statusElement.textContent = `Error initializing Pyodide: ${error.message}`;
+        statusElement.className = 'alert alert-danger';
+        showDebug();
+      }
+    }
+    
+    // Update the list of saved fonts
+    async function updateSavedFontsList() {
+      try {
+        logToDebug('Updating saved fonts list');
+        const savedFonts = await pyodide.runPythonAsync('list_saved_fonts()');
+        
+        if (savedFonts.length === 0) {
+          savedFontsList.innerHTML = '<li class="list-group-item">No saved fonts yet.</li>';
+        } else {
+          savedFontsList.innerHTML = '';
+          savedFonts.forEach(fontName => {
+            const item = document.createElement('li');
+            item.className = 'list-group-item d-flex justify-content-between align-items-center';
+            
+            const nameSpan = document.createElement('span');
+            nameSpan.textContent = fontName;
+            
+            const buttonsDiv = document.createElement('div');
+            
+            const analyzeBtn = document.createElement('button');
+            analyzeBtn.className = 'btn btn-sm btn-primary me-2';
+            analyzeBtn.textContent = 'Analyze';
+            analyzeBtn.addEventListener('click', () => loadSavedFont(fontName));
+            
+            const deleteBtn = document.createElement('button');
+            deleteBtn.className = 'btn btn-sm btn-danger';
+            deleteBtn.textContent = 'Delete';
+            deleteBtn.addEventListener('click', () => deleteSavedFont(fontName));
+            
+            buttonsDiv.appendChild(analyzeBtn);
+            buttonsDiv.appendChild(deleteBtn);
+            
+            item.appendChild(nameSpan);
+            item.appendChild(buttonsDiv);
+            savedFontsList.appendChild(item);
+          });
+        }
+        logToDebug(`Found ${savedFonts.length} saved fonts`);
+      } catch (error) {
+        logToDebug(`Error updating saved fonts list: ${error.message}`);
+        console.error('Error updating saved fonts list:', error);
+      }
+    }
+    
+    // Load and analyze a saved font
+    async function loadSavedFont(fontName) {
+      try {
+        logToDebug(`Loading saved font: ${fontName}`);
+        outputElement.textContent = `Loading font ${fontName}...`;
+        
+        const result = await pyodide.runPythonAsync(`load_saved_font("${fontName}")`);
+        outputElement.innerHTML = formatOutput(result.text);
+        
+        // Store metadata
+        fontFS[fontName] = result.metadata;
+        logToDebug(`Font ${fontName} loaded and analyzed`);
+      } catch (error) {
+        logToDebug(`Error loading font: ${error.message}`);
+        outputElement.textContent = `Error loading font: ${error.message}`;
+        showDebug();
+      }
+    }
+    
+    // Delete a saved font
+    async function deleteSavedFont(fontName) {
+      try {
+        logToDebug(`Deleting font: ${fontName}`);
+        await pyodide.runPythonAsync(`
+          import os
+          font_path = f"/fonts/${fontName}.ttf"
+          if os.path.exists(font_path):
+              os.remove(font_path)
+              log_to_js(f"Deleted {font_path}")
+        `);
+        
+        // Remove from fontFS
+        delete fontFS[fontName];
+        
+        // Update saved fonts list
+        updateSavedFontsList();
+        logToDebug(`Font ${fontName} deleted`);
+      } catch (error) {
+        logToDebug(`Error deleting font: ${error.message}`);
+        console.error('Error deleting font:', error);
+      }
+    }
+    
+    // Format the output with some HTML styling
+    function formatOutput(text) {
+      if (!text) return '';
+      
+      // Escape HTML
+      const escaped = text
+        .replace(/&/g, '&amp;')
+        .replace(/</g, '&lt;')
+        .replace(/>/g, '&gt;');
+      
+      // Add some basic formatting
+      return escaped
+        .replace(/^Font Information:/m, '<h5>Font Information:</h5>')
+        .replace(/^Available Tables:/m, '<h5>Available Tables:</h5>')
+        .replace(/^Name Table Entries:/m, '<h5>Name Table Entries:</h5>')
+        .replace(/^Error/m, '<span class="text-danger">Error</span>')
+        .replace(/^Traceback/m, '<span class="text-danger">Traceback</span>')
+        .replace(/\n/g, '<br>');
+    }
+    
+    // Analyze the font file
+    async function analyzeFont() {
+      try {
+        const file = fontFileInput.files[0];
+        const url = fontUrlInput.value;
+        const saveName = fontNameInput.value;
+        
+        if (!file && !url) {
+          statusElement.textContent = 'Please provide either a file or URL.';
+          statusElement.className = 'alert alert-warning';
+          return;
+        }
+        
+        analyzeButton.disabled = true;
+        spinner.style.display = 'inline-block';
+        
+        let fontData;
+        
+        if (file) {
+          // Process uploaded file
+          logToDebug(`Processing file: ${file.name} (${file.size} bytes)`);
+          statusElement.textContent = 'Reading file...';
+          statusElement.className = 'alert alert-info';
+          
+          const arrayBuffer = await file.arrayBuffer();
+          fontData = new Uint8Array(arrayBuffer);
+        } else if (url) {
+          // Process URL
+          logToDebug(`Processing URL: ${url}`);
+          statusElement.textContent = 'Fetching font from URL...';
+          statusElement.className = 'alert alert-info';
+          
+          try {
+            // Escape any quotes in the URL to prevent injection
+            const safeUrl = url.replace(/"/g, '\\"');
+            fontData = await pyodide.runPythonAsync(`await fetch_font_from_url("${safeUrl}")`);
+            
+            if (!fontData) {
+              throw new Error("Failed to fetch font from URL");
+            }
+          } catch (error) {
+            logToDebug(`Failed to fetch font from URL: ${error.message}`);
+            statusElement.textContent = `Error: Could not fetch font from URL - ${error.message}`;
+            statusElement.className = 'alert alert-danger';
+            analyzeButton.disabled = false;
+            spinner.style.display = 'none';
+            showDebug();
+            return;
+          }
+        }
+        
+        // Use the file name if no save name is provided
+        const effectiveSaveName = saveName || (file ? file.name.replace(/\.[^/.]+$/, "") : url.split('/').pop().replace(/\.[^/.]+$/, ""));
+        
+        statusElement.textContent = 'Analyzing font...';
+        logToDebug(`Analyzing font${effectiveSaveName ? ` and saving as "${effectiveSaveName}"` : ''}`);
+        
+        const result = await pyodide.runPythonAsync(`
+          analyze_font(${pyodide.toPy(fontData)}, ${effectiveSaveName ? `"${effectiveSaveName}"` : "None"})
+        `);
+        
+        // Format the output with HTML
+        outputElement.innerHTML = formatOutput(result.text);
+        
+        // Update status
+        if (result.metadata) {
+          statusElement.textContent = `Font analyzed successfully${effectiveSaveName ? ` and saved as "${effectiveSaveName}"` : ''}.`;
+          statusElement.className = 'alert alert-success';
+        } else {
+          statusElement.textContent = 'Error analyzing font. See details below.';
+          statusElement.className = 'alert alert-danger';
+          showDebug();
+        }
+        
+        // Store metadata
+        if (effectiveSaveName && result.metadata) {
+          fontFS[effectiveSaveName] = result.metadata;
+        }
+        
+        // Update saved fonts list
+        updateSavedFontsList();
+        
+        // Clear inputs
+        fontNameInput.value = '';
+        logToDebug('Font analysis completed');
+      } catch (error) {
+        logToDebug(`Error analyzing font: ${error.message}`);
+        outputElement.textContent = `Error analyzing font: ${error.message}`;
+        statusElement.textContent = 'Error analyzing font. See details below.';
+        statusElement.className = 'alert alert-danger';
+        showDebug();
+      } finally {
+        analyzeButton.disabled = false;
+        spinner.style.display = 'none';
+      }
+    }
+    
+    // Event listeners
+    analyzeButton.addEventListener('click', analyzeFont);
+    
+    // Initialize on page load
+    window.addEventListener('load', () => {
+      logToDebug('Page loaded, initializing Pyodide');
+      showDebug(); // Show debug panel by default for troubleshooting
+      initPyodide();
+    });
+  </script>
+</body>
+</html>
