@@ -3,8 +3,18 @@
 <head>
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
-  <title>Font Inspector with Web Worker</title>
+  <title>PyScript Font Inspector with Web Worker</title>
   <link href="https://cdn.jsdelivr.net/npm/bootstrap@5.3.2/dist/css/bootstrap.min.css" rel="stylesheet">
+  <link rel="stylesheet" href="https://pyscript.net/releases/2025.3.1/core.css">
+  <script type="module" src="https://pyscript.net/releases/2025.3.1/core.js"></script>
+  <py-config>
+    [[workers]]
+    name = "font-worker"
+    src = "_pyscript-worker-script.py"
+    packages = ["fonttools"]
+    # Add paths for the worker's environment
+    paths = ["../../src"]
+  </py-config>
   <style>
     .card {
       margin-bottom: 20px;
@@ -96,9 +106,66 @@
     </div>
   </div>
 
+  <script type="py">
+from js import pyscript, window, document
+from pyodide.ffi import create_proxy
+
+# This script runs on the main thread after PyScript is initialized.
+# We get the worker defined in py-config and expose it to JavaScript.
+
+def main_thread_py_ready():
+    try:
+        font_worker_ref = pyscript.runtime.workers.get("font-worker")
+        if font_worker_ref:
+            # The .sync interface is crucial for JS to interact with the worker proxy
+            window.fontWorker = font_worker_ref.sync
+            document.getElementById('status').textContent = 'PyScript Worker initialized, waiting for Python worker readiness...'
+            # The actual 'ready' state will come from the worker script itself.
+            # Add listener for messages from the new PyScript worker
+            window.fontWorker.onmessage = create_proxy(handle_worker_message_from_py_script)
+            js_log_to_debug("Main thread PyScript got worker reference and set it to window.fontWorker.")
+        else:
+            js_log_to_debug("Failed to get font-worker reference from PyScript runtime.")
+            document.getElementById('status').textContent = 'Error: Could not get PyScript worker reference.';
+            document.getElementById('status').className = 'alert alert-danger';
+    except Exception as e:
+        js_log_to_debug(f"Error in main_thread_py_ready: {str(e)}")
+        document.getElementById('status').textContent = f'Error setting up PyScript worker: {str(e)}';
+        document.getElementById('status').className = 'alert alert-danger';
+
+# This JS function will be callable from Python's perspective if needed,
+# but here it's mainly for the create_proxy.
+def handle_worker_message_from_py_script(event):
+    # This is where messages from the pyscript worker (fontWorker) will be handled by JS
+    # We need to call the existing JS handler.
+    # The event.data might be a PyProxy, so convert it if necessary.
+    # For simplicity, let's assume the worker's postMessage sends data that's directly usable or easily converted.
+    # The original handleWorkerMessage function in JS will be reused.
+
+    # event.data from a PyScript worker to main thread JS is typically already a JS object/value
+    # if the Python worker used to_js or returned basic types.
+    # If not, conversion might be needed: data = event.data.toJs({dict_converter: Object.fromEntries}) if event.data.toJs else event.data
+
+    # Call the existing global JS message handler
+    window.handleWorkerMessage(event);
+
+def js_log_to_debug(message):
+    # A simple way for this main-thread PyScript to log to the JS debug panel
+    # This avoids needing to call back into JS just for logging from here.
+    debug_div = document.getElementById("debug-info")
+    if debug_div:
+        timestamp = window.Date.new().toLocaleTimeString()
+        debug_div.innerHTML += f"<div>[MainPy {timestamp}] {message}</div>"
+        debug_div.scrollTop = debug_div.scrollHeight
+    window.console.log(f"[MainPy] {message}")
+
+# Run when this PyScript block is ready
+main_thread_py_ready()
+  </script>
+
   <script>
-    // Create a worker
-    const worker = new Worker('pyodide-worker.js');
+    // JavaScript for main thread interaction with the PyScript worker
+    let fontWorker; // Will be populated by the main-thread PyScript
     const analyzeButton = document.getElementById('analyze-btn');
     const statusElement = document.getElementById('status');
     const resultContainer = document.getElementById('result-container');
@@ -107,36 +174,39 @@
     const spinner = document.getElementById('spinner');
     const debugInfo = document.getElementById('debug-info');
     
-    // Debug functions
-    function showDebug() {
+    // Debug functions (global for easy access)
+    window.showDebug = function() {
       document.getElementById('debug-container').style.display = 'block';
     }
     
-    function toggleDebug() {
+    window.toggleDebug = function() {
       const debugContainer = document.getElementById('debug-container');
       debugContainer.style.display = debugContainer.style.display === 'none' ? 'block' : 'none';
     }
     
-    function logToDebug(message) {
-      console.log(message);
+    window.logToJsDisplay = function(message, source = "JS") {
+      console.log(`[${source}] ${message}`);
       if (debugInfo) {
-        debugInfo.innerHTML += `<div>[JS] ${message}</div>`;
+        const timestamp = new Date().toLocaleTimeString();
+        debugInfo.innerHTML += `<div>[${source} ${timestamp}] ${message}</div>`;
         debugInfo.scrollTop = debugInfo.scrollHeight;
       }
     }
     
     // Handle messages from the worker
-    worker.onmessage = (event) => {
+    window.handleWorkerMessage = function(event) {
+      // Data from PyScript worker is already a JS object if to_js was used or basic types returned.
       const { type, data } = event.data;
       
+      logToJsDisplay(`Received message from worker: type=${type}`, "Main");
+
       if (type === 'ready') {
-        statusElement.textContent = 'Python is ready!';
+        statusElement.textContent = 'Python Worker is ready!';
         statusElement.className = 'alert alert-success';
         analyzeButton.disabled = false;
-        logToDebug('Pyodide is ready');
+        logToJsDisplay('Python Worker signaled readiness.', "Main");
       } 
       else if (type === 'output') {
-        // Format the output as HTML
         const formattedOutput = formatOutput(data);
         resultContainer.innerHTML = `
           <div class="card">
@@ -150,12 +220,12 @@
         `;
         analyzeButton.disabled = false;
         spinner.style.display = 'none';
-        logToDebug('Analysis completed');
+        logToJsDisplay('Analysis completed by worker.', "Main");
       } 
       else if (type === 'error') {
         resultContainer.innerHTML = `
           <div class="alert alert-danger">
-            <h5 class="alert-heading">Error!</h5>
+            <h5 class="alert-heading">Worker Error!</h5>
             <p>${data}</p>
             <hr>
             <p class="mb-0">Check the debug information for more details.</p>
@@ -164,31 +234,28 @@
         `;
         analyzeButton.disabled = false;
         spinner.style.display = 'none';
-        logToDebug(`Error: ${data}`);
+        logToJsDisplay(`Worker Error: ${data}`, "Main");
         showDebug();
       }
       else if (type === 'log') {
-        logToDebug(`[Worker] ${data}`);
+        // Log messages from worker's Python code
+        logToJsDisplay(data, "WorkerPy");
       }
     };
     
     // Format the output with some HTML styling
     function formatOutput(text) {
       if (!text) return '';
-      
-      // Escape HTML
-      const escaped = text
+      const escaped = String(text)
         .replace(/&/g, '&amp;')
         .replace(/</g, '&lt;')
         .replace(/>/g, '&gt;');
-      
-      // Add some basic formatting
       return escaped
         .replace(/^Font Information:/m, '<h5>Font Information:</h5>')
         .replace(/^Available Tables:/m, '<h5>Available Tables:</h5>')
         .replace(/^Name Table Entries:/m, '<h5>Name Table Entries:</h5>')
-        .replace(/^Error/m, '<span class="text-danger">Error</span>')
-        .replace(/^Traceback/m, '<span class="text-danger">Traceback</span>')
+        .replace(/^Error/m, '<strong class="text-danger">Error</strong>')
+        .replace(/^Traceback/m, '<strong class="text-danger">Traceback</strong>')
         .replace(/\n/g, '<br>');
     }
     
@@ -197,7 +264,7 @@
       const fileNameEl = document.getElementById('file-name');
       if (event.target.files.length > 0) {
         fileNameEl.textContent = `Selected file: ${event.target.files[0].name}`;
-        logToDebug(`File selected: ${event.target.files[0].name}`);
+        logToJsDisplay(`File selected: ${event.target.files[0].name}`, "Main");
       } else {
         fileNameEl.textContent = '';
       }
@@ -205,38 +272,36 @@
     
     // Analyze Font button handler
     analyzeButton.addEventListener('click', async () => {
+      if (!window.fontWorker) {
+        logToJsDisplay("Font worker not available yet.", "Main");
+        statusElement.textContent = 'Error: Font worker not initialized.';
+        statusElement.className = 'alert alert-danger';
+        return;
+      }
+
       if (!fileInput.files.length && !urlInput.value) {
-        resultContainer.innerHTML = `
-          <div class="alert alert-warning">
-            Please provide either a file or URL.
-          </div>
-        `;
+        resultContainer.innerHTML = `<div class="alert alert-warning">Please provide either a file or URL.</div>`;
         return;
       }
       
       analyzeButton.disabled = true;
       spinner.style.display = 'inline-block';
-      resultContainer.innerHTML = `
-        <div class="alert alert-info">
-          Analyzing font... Please wait.
-        </div>
-      `;
+      resultContainer.innerHTML = `<div class="alert alert-info">Analyzing font... Please wait.</div>`;
       
       try {
         if (fileInput.files.length > 0) {
-          // Process file
           const file = fileInput.files[0];
-          logToDebug(`Processing file: ${file.name} (${file.size} bytes)`);
+          logToJsDisplay(`Processing file: ${file.name} (${file.size} bytes)`, "Main");
           const arrayBuffer = await file.arrayBuffer();
-          worker.postMessage({
+          // For PyScript workers, ArrayBuffer is transferable.
+          window.fontWorker.postMessage({
             type: 'analyze_font_file',
             data: arrayBuffer
-          });
+          }, [arrayBuffer]); // Transferring ArrayBuffer
         } else if (urlInput.value) {
-          // Process URL
           const url = urlInput.value.trim();
-          logToDebug(`Processing URL: ${url}`);
-          worker.postMessage({
+          logToJsDisplay(`Processing URL: ${url}`, "Main");
+          window.fontWorker.postMessage({
             type: 'analyze_font_url',
             url: url
           });
@@ -244,23 +309,23 @@
       } catch (error) {
         resultContainer.innerHTML = `
           <div class="alert alert-danger">
-            <h5 class="alert-heading">Error!</h5>
+            <h5 class="alert-heading">JS Error!</h5>
             <p>${error.message || 'Unknown error occurred'}</p>
-            <hr>
-            <p class="mb-0">Check the debug information for more details.</p>
+            <hr><p class="mb-0">Check the debug information.</p>
             <button class="btn btn-sm btn-outline-danger mt-2" onclick="showDebug()">Show Debug Info</button>
-          </div>
-        `;
+          </div>`;
         analyzeButton.disabled = false;
         spinner.style.display = 'none';
-        logToDebug(`Error: ${error.message}`);
+        logToJsDisplay(`JS Error during postMessage: ${error.message}`, "Main");
         showDebug();
       }
     });
     
     // Initialize
     document.addEventListener('DOMContentLoaded', function() {
-      logToDebug("DOM loaded, worker initialized");
+      statusElement.textContent = 'Loading PyScript and Worker...';
+      logToJsDisplay("DOM loaded. Main thread PyScript is initializing worker reference.", "Main");
+      // showDebug(); // Optionally show debug by default
     });
   </script>
 </body>

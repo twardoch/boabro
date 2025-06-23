@@ -19,149 +19,78 @@
 
   <py-config>
     packages = ["fonttools"]
+    paths = ["../../src"]
   </py-config>
   
   <py-script>
-from fontTools.ttLib import TTFont
 import io
-import js
-import pyodide.http
+import js # For js.console, js.Uint8Array
+# TTFont and pyodide.http will be used by the imported utilities
+from boabro.boabro import fetch_font_bytes_from_url, analyze_font_data
+# from pyodide.ffi import to_js # Not strictly needed if PyScript handles dict conversion
 
-async def fetch_font_from_url(url):
-    try:
-        # Add custom headers to help with CORS issues
-        headers = {
-            "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/91.0.4472.124 Safari/537.36",
-            "Accept": "*/*",
-            "Accept-Language": "en-US,en;q=0.9"
-        }
-        
-        # List of CORS proxies to try
-        cors_proxies = [
-            "https://corsproxy.io/?",
-            "https://api.allorigins.win/raw?url=",
-            "https://cors-anywhere.herokuapp.com/",
-            "https://cors.eu.org/",
-            "https://xofix.4kb.dev/?url="
-        ]
-        
-        # If it's a GitHub URL, try to use a more direct approach first
-        if "github.com" in url and "raw" in url:
-            # Try to convert to raw.githubusercontent.com if not already
-            if "raw.githubusercontent.com" not in url:
-                # Convert github.com URL to raw.githubusercontent.com
-                raw_url = url.replace("github.com", "raw.githubusercontent.com")
-                raw_url = raw_url.replace("/blob/", "/")
-                print(f"Converted to raw URL: {raw_url}")
-                try:
-                    response = await pyodide.http.pyfetch(raw_url, headers=headers)
-                    if response.status == 200:
-                        return await response.bytes()
-                except Exception as raw_error:
-                    print(f"Raw URL request failed: {str(raw_error)}")
-        
-        # Try each CORS proxy in sequence
-        for proxy in cors_proxies:
-            proxy_url = f"{proxy}{url}"
-            print(f"Trying CORS proxy: {proxy}")
-            try:
-                response = await pyodide.http.pyfetch(proxy_url, headers=headers)
-                if response.status == 200:
-                    return await response.bytes()
-                else:
-                    print(f"Proxy {proxy} request failed with status: {response.status}")
-            except Exception as proxy_error:
-                print(f"Proxy {proxy} request failed: {str(proxy_error)}")
-        
-        # Try direct URL as fallback
-        print("Trying direct URL request")
-        response = await pyodide.http.pyfetch(url, headers=headers)
-        if response.status == 200:
-            return await response.bytes()
-        else:
-            print(f"Direct request failed with status: {response.status}")
-            
-            # Try with no-cors mode as a last resort
-            print("Attempting with no-cors mode")
-            try:
-                response = await pyodide.http.pyfetch(url, headers=headers, mode="no-cors")
-                return await response.bytes()
-            except Exception as no_cors_error:
-                print(f"No-cors request failed: {str(no_cors_error)}")
-        
-        # If we got here, all attempts failed
-        print("All fetch attempts failed")
-        return None
-    except Exception as e:
-        print(f"Error fetching font: {str(e)}")
-        return None
+# This local version will be removed (fetch_font_from_url)
+# The local analyze_font will also be removed.
 
-def analyze_font(font_data):
-    # Load the font from bytes
-    font_io = io.BytesIO(font_data)
-    font = TTFont(font_io)
-    
-    # Get UPM value
-    upm = font["head"].unitsPerEm
-    
-    # Get name table entries
-    name_table = font["name"]
-    
-    # Helper to get name 
-    def get_name(nameID):
-        entry = name_table.getName(nameID, 3, 1, 0x409) or name_table.getName(nameID, 1, 0, 0)
-        return entry.toUnicode() if entry else "(N/A)"
-    
-    # Create a list to store the name table data
-    name_data = []
-    
-    for record in name_table.names:
-        try:
-            name_id = record.nameID
-            platform_id = record.platformID
-            string = record.toUnicode()
-            name_data.append({"nameId": name_id, "platformId": platform_id, "string": string})
-        except:
-            name_data.append({"nameId": record.nameID, "platformId": record.platformID, "string": "(could not decode)"})
-    
-    # Return structured data
-    return {
-        "familyName": get_name(1),
-        "subfamily": get_name(2),
-        "fullName": get_name(4),
-        "version": get_name(5),
-        "upm": upm,
-        "nameTable": name_data,
-        "numGlyphs": len(font.getGlyphOrder()),
-        "tables": list(font.keys())
-    }
+def _adapt_analysis_for_preact(analysis_data: dict) -> dict:
+    """
+    Adapts the comprehensive dictionary from analyze_font_data
+    to the specific structure Preact component expects, notably mapping
+    'nameTableRecords' to 'nameTable'.
+    """
+    if not analysis_data:
+        return {} # Or raise error, but component expects a dict
+
+    # Create a new dict to avoid modifying the original if it's from a cache or shared
+    adapted_data = analysis_data.copy()
+    adapted_data['nameTable'] = adapted_data.pop('nameTableRecords', []) # Rename key for Preact template
+    return adapted_data
 
 # Function to be called from JavaScript for file uploads
-def process_font(font_data_js):
+def process_font(font_data_js_array, filename="uploaded_font"):
+    js.console.log(f"[Python Preact] process_font for {filename}")
     try:
-        # Convert JS Uint8Array to Python bytes
-        font_data = bytes(font_data_js.to_py())
-        result = analyze_font(font_data)
-        return {"success": True, "data": result}
+        font_bytes = bytes(font_data_js_array.to_py())
+
+        # Call shared utility
+        analysis_data = analyze_font_data(font_bytes, filename=filename) # from boabro.boabro
+
+        # Adapt for Preact component's expected structure
+        adapted_result = _adapt_analysis_for_preact(analysis_data)
+
+        return {"success": True, "data": adapted_result}
     except Exception as e:
+        js.console.log(f"[Python Preact] Error in process_font for {filename}: {str(e)}")
         return {"success": False, "error": str(e)}
 
 # Function to be called from JavaScript for URLs
-async def process_font_url(url):
+async def process_font_url(url_str: str):
+    js.console.log(f"[Python Preact] process_font_url for: {url_str}")
     try:
-        font_data = await fetch_font_from_url(url)
-        if font_data:
-            result = analyze_font(font_data)
-            return {"success": True, "data": result}
+        font_bytes = await fetch_font_bytes_from_url(url_str) # from boabro.boabro
+        if font_bytes:
+            filename = url_str.split('/')[-1] if url_str else "font_from_url"
+            analysis_data = analyze_font_data(font_bytes, filename=filename)
+
+            # Adapt for Preact component's expected structure
+            adapted_result = _adapt_analysis_for_preact(analysis_data)
+            return {"success": True, "data": adapted_result}
         else:
-            return {"success": False, "error": f"Failed to fetch font from URL: {url}"}
+            # fetch_font_bytes_from_url returns None on failure, which is caught by the generic except below if not handled here
+            return {"success": False, "error": f"Failed to fetch font from URL: {url_str} (utility returned None)"}
     except Exception as e:
+        js.console.log(f"[Python Preact] Error in process_font_url for {url_str}: {str(e)}")
         return {"success": False, "error": f"Error processing font URL: {str(e)}"}
   </py-script>
 
 
   <script type="module">
+    let isPyScriptReady = false; // Global flag
+
     document.addEventListener('py:ready', () => {
+      console.log('[MainJS] py:ready event fired.');
+      isPyScriptReady = true;
+
       const { h, render, useState, useEffect } = preact;
       const { signal, computed, effect } = preact;
       
@@ -210,6 +139,13 @@ async def process_font_url(url):
         };
         
         const analyzeFontFile = async () => {
+          console.log('[PreactApp] analyzeFontFile called.');
+          if (!isPyScriptReady) {
+            error.value = 'PyScript not ready. Please wait.';
+            console.error('[PreactApp] Analysis attempted before PyScript was ready.');
+            return;
+          }
+
           if (!hasFile.value && !fontUrl.value) {
             error.value = 'Please provide either a file or URL';
             return;
@@ -218,42 +154,48 @@ async def process_font_url(url):
           processing.value = true;
           error.value = null;
           result.value = null;
+          console.log('[PreactApp] Processing started.');
           
           try {
-            // Call the Python function
-            const pyodide = await pyscript.interpreter;
+            if (!pyscript || !pyscript.interpreter) {
+              throw new Error("PyScript interpreter is not available.");
+            }
+            const interpreter = pyscript.interpreter; // No await needed here
             
-            // Prefer file over URL if both are provided
+            const process_font_py = interpreter.globals.get('process_font');
+            const process_font_url_py = interpreter.globals.get('process_font_url');
+            let responsePyProxy;
+
             if (hasFile.value && fileData) {
+              console.log('[PreactApp] Analyzing file:', fileName.value);
               const arrayBuffer = await fileData.arrayBuffer();
-              const fontData = new Uint8Array(arrayBuffer);
-              
-              // Process file
-              const response = await pyodide.globals.get('process_font')(fontData);
-              
-              if (response.success) {
-                result.value = response.data;
-              } else {
-                error.value = `Error analyzing font: ${response.error}`;
-                result.value = null;
-              }
+              const fontDataJsArr = new Uint8Array(arrayBuffer);
+              responsePyProxy = await process_font_py(fontDataJsArr);
             } 
             else if (fontUrl.value) {
-              // Process URL
-              const response = await pyodide.globals.get('process_font_url')(fontUrl.value);
+              console.log('[PreactApp] Analyzing URL:', fontUrl.value);
+              responsePyProxy = await process_font_url_py(fontUrl.value);
+            } else {
+              throw new Error("No data source for analysis."); // Should be caught by earlier check
+            }
+
+            const response = responsePyProxy.toJs({ dict_converter: Object.fromEntries });
+            responsePyProxy.destroy();
+            console.log('[PreactApp] Python response:', response);
               
-              if (response.success) {
-                result.value = response.data;
-              } else {
-                error.value = `Error analyzing font: ${response.error}`;
-                result.value = null;
-              }
+            if (response.success) {
+              result.value = response.data;
+            } else {
+              error.value = `Error analyzing font: ${response.error || 'Unknown Python error'}`;
+              result.value = null;
             }
           } catch (err) {
-            error.value = `Error: ${err.message}`;
+            console.error('[PreactApp] Error during analysis:', err);
+            error.value = `JavaScript Error: ${err.message}`;
             result.value = null;
           } finally {
             processing.value = false;
+            console.log('[PreactApp] Processing finished.');
           }
         };
         

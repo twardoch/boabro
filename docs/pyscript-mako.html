@@ -26,11 +26,13 @@
     </script>
 
     <!-- PyScript Code -->
-    <script type="py" config='{"packages":["mako","fonttools"]}'>
+    <script type="py" config='{"packages":["mako","fonttools"], "paths": ["../../src"]}'>
 from mako.template import Template
 from js import document, console
 from pyodide.ffi import create_proxy
 import io, traceback
+
+from boabro.boabro import analyze_font_data # Only this is needed
 
 # Debug logging (simplified)
 def debug_log(message):
@@ -43,48 +45,64 @@ def debug_log(message):
     console.log(message)
 
 # --- Font Processing ---
-async def process_font(font_data):
-    debug_log("Processing font data...")
+async def process_font(font_bytes, filename="uploaded_font"): # Added filename parameter
+    debug_log(f"Mako: Processing font data for {filename}...")
     try:
-        from fontTools.ttLib import TTFont
-        font = TTFont(io.BytesIO(font_data))
-        names = font["name"]
+        # Use the shared analysis function
+        analysis_result = analyze_font_data(font_bytes, filename)
 
-        def get_name(nameID):
-            entry = names.getName(nameID, 3, 1, 0x409) or names.getName(
-                nameID, 1, 0, 0
-            )
-            return entry.toStr() if entry else "(N/A)"
+        if "error" in analysis_result:
+            debug_log(f"Mako: Analysis error: {analysis_result['error']}")
+            return "", analysis_result["error"]
 
-        info = [
-            f"Family Name: {get_name(1)}",
-            f"Subfamily: {get_name(2)}",
-            f"Full Name: {get_name(4)}",
-            f"Units Per Em: {font['head'].unitsPerEm}",
-            f"Tables: {', '.join(sorted(font.keys()))}",
-            f"Number of Glyphs: {len(font.getGlyphOrder())}",
-        ]
-        return "\n".join(info), ""  # Success: return info, no error
+        # Format the result for display in Mako template (similar to original)
+        display_info_parts = []
+        name_details = analysis_result.get("name", {})
+        head_details = analysis_result.get("head", {})
+
+        display_info_parts.append(f"Family Name: {name_details.get('font_family', 'N/A')}")
+        display_info_parts.append(f"Subfamily: {name_details.get('font_subfamily', 'N/A')}")
+        display_info_parts.append(f"Full Name: {name_details.get('full_name', 'N/A')}")
+        display_info_parts.append(f"Version: {name_details.get('version', 'N/A')}")
+        display_info_parts.append(f"PostScript Name: {name_details.get('postscript_name', 'N/A')}")
+
+        display_info_parts.append(f"Units Per Em: {head_details.get('unitsPerEm', 'N/A')}")
+
+        num_glyphs = "N/A"
+        if "glyf" in analysis_result and "num_glyphs" in analysis_result["glyf"]:
+            num_glyphs = analysis_result["glyf"]["num_glyphs"]
+        elif "CFF " in analysis_result and analysis_result["CFF "].get("top_dict_data"):
+            num_glyphs = analysis_result["CFF "]["top_dict_data"].get("num_glyphs", "N/A")
+        display_info_parts.append(f"Number of Glyphs: {num_glyphs}")
+
+        display_info_parts.append(f"Tables: {', '.join(sorted(analysis_result.get('tables', [])))}")
+
+        info_string = "\n".join(display_info_parts)
+        debug_log("Mako: Font info extracted successfully.")
+        return info_string, ""  # Success: return info_string, no error
+
     except Exception as e:
-        error_msg = f"Error processing font: {str(e)}"
+        error_msg = f"Mako: Error in process_font: {str(e)}"
         debug_log(error_msg)
         debug_log(traceback.format_exc())
         return "", error_msg  # Failure: return no info, error message
 
 # --- Event Handlers ---
 async def process_file_click(event):
-    debug_log("Process button clicked")
+    debug_log("Mako: Process button clicked")
     upload = document.getElementById("font-upload")
     if upload.files and upload.files.length > 0:
         file = upload.files.item(0)
+        filename = file.name
         try:
             array_buffer = await file.arrayBuffer()
-            font_data = array_buffer.to_bytes()
-            info, error = await process_font(font_data) # process_font is now async.
-            render_template(info, error) # Call render, now that we have results
+            font_data_bytes = array_buffer.to_bytes()
+            # Pass filename to process_font
+            info, error = await process_font(font_data_bytes, filename)
+            render_template(info, error)
         except Exception as e:
-            debug_log(f"Error reading file: {str(e)}")
-            render_template("", f"Error reading file: {str(e)}")  # Update UI
+            debug_log(f"Mako: Error reading file: {str(e)}")
+            render_template("", f"Error reading file: {str(e)}")
     else:
         debug_log("No file selected")
         render_template("", "No file selected.") #Update UI

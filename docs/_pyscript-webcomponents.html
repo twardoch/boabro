@@ -1,0 +1,732 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Font Inspector - Web Components</title>
+  <link rel="stylesheet" href="https://pyscript.net/releases/2025.3.1/core.css">
+  <script type="module" src="https://pyscript.net/releases/2025.3.1/core.js"></script>
+  <style>
+    :root {
+      --primary-color: #4a6da7;
+      --accent-color: #f39c12;
+      --bg-color: #f5f7fa;
+      --card-bg: #ffffff;
+      --text-color: #333333;
+    }
+
+    body {
+      font-family: system-ui, -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, Oxygen, Ubuntu, Cantarell, sans-serif;
+      background-color: var(--bg-color);
+      color: var(--text-color);
+      line-height: 1.6;
+      margin: 0;
+      padding: 20px;
+    }
+
+    .container {
+      max-width: 800px;
+      margin: 0 auto;
+    }
+
+    .card {
+      background-color: var(--card-bg);
+      border-radius: 8px;
+      box-shadow: 0 2px 10px rgba(0, 0, 0, 0.1);
+      padding: 20px;
+      margin-bottom: 20px;
+    }
+
+    button {
+      background-color: var(--primary-color);
+      color: white;
+      border: none;
+      border-radius: 4px;
+      padding: 8px 16px;
+      cursor: pointer;
+      font-weight: 500;
+      transition: background-color 0.2s;
+    }
+
+    button:hover {
+      background-color: #3a5a8f;
+    }
+
+    button:disabled {
+      background-color: #cccccc;
+      cursor: not-allowed;
+    }
+
+    table {
+      width: 100%;
+      border-collapse: collapse;
+      margin-top: 16px;
+    }
+
+    th, td {
+      padding: 12px;
+      text-align: left;
+      border-bottom: 1px solid #e1e1e1;
+    }
+
+    th {
+      background-color: #f8f9fa;
+      font-weight: 600;
+    }
+  </style>
+</head>
+<body>
+  <div class="container">
+    <h1>Font Inspector</h1>
+    <font-analyzer></font-analyzer>
+  </div>
+
+  <py-config>
+    packages = ["fonttools"]
+    paths = ["../../src"]
+  </py-config>
+
+  <py-script>
+# from fontTools.ttLib import TTFont # No longer directly used
+import io
+import js
+# import pyodide.http # No longer directly used for fetching here
+
+from boabro.boabro import analyze_font_data, fetch_font_bytes_from_url
+
+# Local fetch_font_from_url and analyze_font are removed. Using shared versions.
+
+def _transform_analysis_for_js(analysis_result_dict, filename="font_file"):
+    """
+    Transforms the result from boabro.analyze_font_data to the structure
+    expected by the JavaScript side of this web component.
+    """
+    if not analysis_result_dict or "error" in analysis_result_dict:
+        return analysis_result_dict
+
+    js_result = {}
+
+    # UPM
+    js_result["upm"] = analysis_result_dict.get("head", {}).get("unitsPerEm", "N/A")
+
+    # Name Table (transformed)
+    raw_name_table = analysis_result_dict.get("name", {}).get("records", [])
+    js_result["nameTable"] = [
+        {"nameId": r.get("nameID"), "platformId": r.get("platformID"), "string": r.get("string", "(N/A)")}
+        for r in raw_name_table
+    ]
+
+    # Number of Glyphs
+    # Try 'glyf' table first, then 'CFF '
+    if "glyf" in analysis_result_dict and "num_glyphs" in analysis_result_dict["glyf"]:
+        js_result["numGlyphs"] = analysis_result_dict["glyf"]["num_glyphs"]
+    elif "CFF " in analysis_result_dict and "top_dict_data" in analysis_result_dict["CFF "] and "num_glyphs" in analysis_result_dict["CFF "]["top_dict_data"]:
+        js_result["numGlyphs"] = analysis_result_dict["CFF "]["top_dict_data"]["num_glyphs"]
+    else:
+        js_result["numGlyphs"] = "N/A"
+
+    # Tables
+    js_result["tables"] = analysis_result_dict.get("tables", [])
+
+    # Specific name entries
+    name_info = analysis_result_dict.get("name", {})
+    js_result["familyName"] = name_info.get("font_family", "N/A")
+    js_result["subfamily"] = name_info.get("font_subfamily", "N/A")
+    js_result["fullName"] = name_info.get("full_name", "N/A")
+
+    # Add filename if available (useful for display)
+    js_result["fileName"] = filename
+
+    return js_result
+
+# Function to be called from JavaScript for file uploads
+def process_font(font_data_js, filename_js="uploaded_file.dat"):
+    try:
+        print(f"WebComponent: process_font called for {filename_js}")
+        # Convert JS Uint8Array to Python bytes
+        font_bytes = bytes(font_data_js.to_py())
+
+        # Use the shared analysis function
+        analysis_result = analyze_font_data(font_bytes, filename_js)
+
+        # Transform for JS expectations
+        js_output = _transform_analysis_for_js(analysis_result, filename_js)
+        print(f"WebComponent: process_font successful for {filename_js}")
+        return js_output
+
+    except Exception as e:
+        print(f"WebComponent: Error in process_font: {str(e)}")
+        import traceback
+        traceback.print_exc()
+        return {"error": str(e)}
+
+# Function to be called from JavaScript for URLs
+async def process_font_url(url):
+    try:
+        print(f"WebComponent: process_font_url called for {url}")
+        # Use the shared fetching function
+        font_bytes = await fetch_font_bytes_from_url(url)
+
+        if font_bytes:
+            filename_from_url = url.split('/')[-1]
+            # Use the shared analysis function
+            analysis_result = analyze_font_data(font_bytes, filename_from_url)
+
+            # Transform for JS expectations
+            js_output = _transform_analysis_for_js(analysis_result, filename_from_url)
+            print(f"WebComponent: process_font_url successful for {url}")
+            return js_output
+        else:
+            print(f"WebComponent: fetch_font_bytes_from_url failed for {url}")
+            return {"error": f"Failed to fetch font from URL: {url}. Check browser console for more details from boabro.py."}
+
+    except Exception as e:
+        print(f"WebComponent: Error in process_font_url: {str(e)}")
+        import traceback
+        traceback.print_exc()
+        return {"error": f"Error processing font URL: {str(e)}"}
+  </py-script>
+
+  <script>
+    // Wait for PyScript to be ready before defining the component
+    document.addEventListener('py:ready', () => {
+      class FontAnalyzer extends HTMLElement {
+        constructor() {
+          super();
+          this.attachShadow({ mode: 'open' });
+
+          // Initial state
+          this.state = {
+            hasFile: false,
+            processing: false,
+            result: null,
+            error: null,
+            fileName: null,
+            fontUrl: "https://github.com/google/fonts/raw/refs/heads/main/ofl/abrilfatface/AbrilFatface-Regular.ttf"
+          };
+
+          this.render();
+        }
+
+      // connectedCallback() {
+        // this.setupEventListeners(); // Call from render instead
+      // }
+
+      setupEventListeners() {
+        // Ensure elements exist before adding listeners, especially if render can be called multiple times
+        const fileInput = this.shadowRoot.querySelector('#font-file');
+        const analyzeButton = this.shadowRoot.querySelector('#analyze-btn');
+        const urlInput = this.shadowRoot.querySelector('#font-url');
+
+        if (fileInput && !fileInput._listenerAttached) {
+          fileInput.addEventListener('change', (e) => this.handleFileChange(e));
+          fileInput._listenerAttached = true; // Mark as attached
+        }
+        if (analyzeButton && !analyzeButton._listenerAttached) {
+          analyzeButton.addEventListener('click', () => this.analyzeFontFile());
+          analyzeButton._listenerAttached = true;
+        }
+        if (urlInput && !urlInput._listenerAttached) {
+          urlInput.addEventListener('input', (e) => this.handleUrlChange(e));
+          urlInput._listenerAttached = true;
+        }
+      }
+
+      handleFileChange(event) {
+        this.state.hasFile = event.target.files.length > 0;
+        if (this.state.hasFile) {
+          this.fileData = event.target.files[0];
+          this.state.fileName = this.fileData.name;
+        } else {
+          this.fileData = null;
+          this.state.fileName = null;
+        }
+        this.state.result = null;
+        this.state.error = null;
+        this.render();
+      }
+
+      handleUrlChange(event) {
+        this.state.fontUrl = event.target.value;
+        this.state.result = null;
+        this.state.error = null;
+        this.render();
+      }
+
+      async analyzeFontFile() {
+        console.log('[WebComponent] analyzeFontFile called. Current state:', JSON.parse(JSON.stringify(this.state)));
+        // Check if we have either a file or URL
+        if (!this.state.hasFile && !this.state.fontUrl) {
+          this.state.error = "Please provide either a font file or URL";
+          console.warn('[WebComponent] No file or URL provided.');
+          this.render();
+          return;
+        }
+
+        this.state.processing = true;
+        this.state.error = ''; // Clear previous error
+        this.state.result = null; // Clear previous result
+        this.render(); // Update UI to show processing state
+        console.log('[WebComponent] Processing started.');
+
+        try {
+          // PyScript should be ready because the component itself is defined in py:ready
+          if (!window.pyscript || !window.pyscript.interpreter) {
+            throw new Error("PyScript interpreter not available.");
+          }
+          const interpreter = pyscript.interpreter; // No await needed
+
+          const process_font_py = interpreter.globals.get('process_font');
+          const process_font_url_py = interpreter.globals.get('process_font_url');
+          let analysisResultPyProxy;
+
+          if (this.state.hasFile && this.fileData) {
+            console.log('[WebComponent] Analyzing file:', this.state.fileName);
+            const arrayBuffer = await this.fileData.arrayBuffer();
+            const fontDataJsArr = new Uint8Array(arrayBuffer);
+            analysisResultPyProxy = await process_font_py(fontDataJsArr);
+          }
+          else if (this.state.fontUrl) {
+            console.log('[WebComponent] Analyzing URL:', this.state.fontUrl);
+            analysisResultPyProxy = await process_font_url_py(this.state.fontUrl);
+          } else {
+            throw new Error("No data source for analysis."); // Should be caught by earlier check
+          }
+
+          const analysisResult = analysisResultPyProxy.toJs({ dict_converter: Object.fromEntries });
+          analysisResultPyProxy.destroy();
+          console.log('[WebComponent] Python analysis result:', analysisResult);
+
+          if (analysisResult.error) {
+            this.state.error = `Error analyzing font: ${analysisResult.error}`;
+            console.error('[WebComponent] Python returned an error:', this.state.error);
+          } else {
+            // Add filename to result if not already present (e.g. from URL analysis)
+            if (!analysisResult.fileName && this.state.fileName) analysisResult.fileName = this.state.fileName;
+            this.state.result = analysisResult;
+            console.log('[WebComponent] Analysis successful.');
+          }
+        } catch (e) {
+          this.state.error = `JavaScript Error: ${e.message}`;
+          console.error('[WebComponent] JavaScript error during analysis:', e);
+        } finally {
+          this.state.processing = false;
+          console.log('[WebComponent] Processing finished. Final state:', JSON.parse(JSON.stringify(this.state)));
+          this.render();
+        }
+      }
+
+      // waitForPyScript is likely not needed here as component definition is inside py:ready
+      // async waitForPyScript() {
+      //   return new Promise((resolve) => {
+      //     if (window.pyscript && window.pyscript.interpreter) {
+      //       console.log('[WebComponent] PyScript interpreter available in waitForPyScript.');
+      //       resolve();
+      //     } else {
+      //       console.log('[WebComponent] PyScript interpreter NOT available in waitForPyScript, adding listener.');
+      //       document.addEventListener('py:ready', () => {
+      //         console.log('[WebComponent] py:ready fired for waitForPyScript.');
+      //         resolve();
+      //       }, { once: true });
+      //     }
+      //   });
+      // }
+
+      render() {
+        // console.log('[WebComponent] render() called. State:', JSON.parse(JSON.stringify(this.state)));
+        const { hasFile, processing, result, error, fileName } = this.state;
+
+        this.shadowRoot.innerHTML = `
+          <style>
+            /* Styles should be self-contained or inherited via ::part if needed */
+            :host {
+              display: block;
+              font-family: system-ui, sans-serif; /* Basic font stack */
+            }
+            .card {
+              background-color: white; /* Assuming var(--card-bg) is white or similar */
+              border-radius: 8px;
+              box-shadow: 0 2px 10px rgba(0, 0, 0, 0.1);
+              padding: 20px;
+              margin-bottom: 20px;
+            }
+            button {
+              background-color: #4a6da7; /* Assuming var(--primary-color) */
+              color: white;
+              border: none;
+              border-radius: 4px;
+              padding: 8px 16px;
+              cursor: pointer;
+              font-weight: 500;
+            }
+            button:disabled {
+              background-color: #cccccc;
+              cursor: not-allowed;
+            }
+            .file-info {
+              margin-top: 8px;
+              font-size: 0.9em;
+              color: #666;
+            }
+            .error {
+              color: #e74c3c; /* Red for errors */
+              padding: 12px;
+              background-color: #fadbd8; /* Light red background */
+              border-radius: 4px;
+              margin-top: 16px;
+              border: 1px solid #e74c3c;
+            }
+            table {
+              width: 100%;
+              border-collapse: collapse;
+              margin-top: 16px;
+            }
+            th, td {
+              padding: 10px; /* Adjusted padding */
+              text-align: left;
+              border-bottom: 1px solid #e1e1e1;
+            }
+            th {
+              background-color: #f8f9fa;
+              font-weight: 600;
+            }
+            .info-grid {
+              display: grid;
+              grid-template-columns: repeat(auto-fill, minmax(200px, 1fr));
+              gap: 16px;
+              margin-bottom: 24px;
+            }
+            .info-item {
+              background-color: #f8f9fa;
+              padding: 12px;
+              border-radius: 4px;
+            }
+            .info-item h4 {
+              margin-top: 0;
+              margin-bottom: 8px;
+              color: #4a6da7; /* Assuming var(--primary-color) */
+            }
+            .spinner {
+              border: 4px solid rgba(0, 0, 0, 0.1);
+              width: 36px;
+              height: 36px;
+              border-radius: 50%;
+              border-left-color: #4a6da7; /* Assuming var(--primary-color) */
+              animation: spin 1s linear infinite;
+              margin: 20px auto;
+            }
+            @keyframes spin {
+              0% { transform: rotate(0deg); }
+              100% { transform: rotate(360deg); }
+            }
+            /* Basic input styling, can be enhanced */
+            input[type="file"], input[type="url"] {
+                display: block;
+                width: calc(100% - 16px); /* Account for padding */
+                padding: 8px;
+                margin-bottom: 8px;
+                border: 1px solid #ccc;
+                border-radius: 4px;
+                box-sizing: border-box;
+            }
+          </style>
+
+          <div class="card">
+            <h2>Upload Font File</h2>
+            <p>Select a TTF or OTF font file to analyze its properties, or provide a URL.</p>
+
+            <div style="margin-bottom: 16px;">
+              <label style="display: block; margin-bottom: 8px; font-weight: bold;">Font File:</label>
+              <input type="file" id="font-file" accept=".ttf,.otf,.woff,.woff2" ${processing ? 'disabled' : ''}>
+
+              ${fileName ? `
+                <div class="file-info">
+                  Selected file: ${fileName}
+                </div>
+              ` : ''}
+            </div>
+
+            <div style="margin-bottom: 16px;">
+              <label style="display: block; margin-bottom: 8px; font-weight: bold;">Font URL:</label>
+              <input
+                type="url"
+                id="font-url"
+                value="${this.state.fontUrl || ''}"
+                placeholder="https://example.com/font.ttf"
+                ${processing ? 'disabled' : ''}>
+              <div style="margin-top: 4px; font-size: 0.9em; color: #666;">
+                If both file and URL are provided, the file will be used.
+              </div>
+            </div>
+
+            <div style="margin-top: 16px;">
+              <button id="analyze-btn" ${(!this.state.hasFile && !this.state.fontUrl) || processing ? 'disabled' : ''}>
+                ${processing ? 'Processing...' : 'Analyze Font'}
+              </button>
+            </div>
+          </div>
+
+          ${processing ? `
+            <div class="card">
+              <div class="spinner"></div>
+              <p style="text-align: center;">Analyzing font file...</p>
+            </div>
+          ` : ''}
+
+          ${error ? `
+            <div class="card">
+              <div class="error" role="alert">${error}</div>
+            </div>
+          ` : ''}
+
+          ${result && !error ? `
+            <div class="card">
+              <h2>Font Information: ${result.fileName || this.state.fileName || (this.state.fontUrl ? new URL(this.state.fontUrl).pathname.split('/').pop() : '')}</h2>
+
+              <div style="margin-bottom: 20px;">
+                <p><strong>Family Name:</strong> ${result.familyName}</p>
+                <p><strong>Subfamily:</strong> ${result.subfamily}</p>
+                <p><strong>Full Name:</strong> ${result.fullName}</p>
+              </div>
+
+              <div class="info-grid">
+                <div class="info-item">
+                  <h4>Units Per Em (UPM)</h4>
+                  <div>${result.upm}</div>
+                </div>
+
+                <div class="info-item">
+                  <h4>Number of Glyphs</h4>
+                  <div>${result.numGlyphs}</div>
+                </div>
+              </div>
+
+              <h3>Available Tables</h3>
+              <div style="display: flex; flex-wrap: wrap; gap: 8px; margin-bottom: 24px;">
+                ${(result.tables || []).map(table => `
+                  <span style="background-color: #e9ecef; padding: 4px 8px; border-radius: 4px;">${table}</span>
+                `).join('')}
+              </div>
+
+              <h3>Name Table Entries</h3>
+              <table>
+                <thead>
+                  <tr>
+                    <th>Name ID</th>
+                    <th>Platform ID</th>
+                    <th>String</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  ${(result.nameTable || []).map(entry => `
+                    <tr>
+                      <td>${entry.nameId}</td>
+                      <td>${entry.platformId}</td>
+                      <td>${entry.string}</td>
+                    </tr>
+                  `).join('')}
+                </tbody>
+              </table>
+            </div>
+          ` : ''}
+        `;
+
+        // Re-attach event listeners after re-rendering the shadow DOM
+        this.setupEventListeners();
+      }
+    }
+
+    customElements.define('font-analyzer', FontAnalyzer);
+    console.log('[MainJS] FontAnalyzer component defined and registered.');
+    });
+  </script>
+</body>
+            }
+            .card {
+              background-color: white;
+              border-radius: 8px;
+              box-shadow: 0 2px 10px rgba(0, 0, 0, 0.1);
+              padding: 20px;
+              margin-bottom: 20px;
+            }
+            button {
+              background-color: var(--primary-color, #4a6da7);
+              color: white;
+              border: none;
+              border-radius: 4px;
+              padding: 8px 16px;
+              cursor: pointer;
+              font-weight: 500;
+            }
+            button:disabled {
+              background-color: #cccccc;
+              cursor: not-allowed;
+            }
+            .file-info {
+              margin-top: 8px;
+              font-size: 0.9em;
+              color: #666;
+            }
+            .error {
+              color: #e74c3c;
+              padding: 12px;
+              background-color: #fadbd8;
+              border-radius: 4px;
+              margin-top: 16px;
+            }
+            table {
+              width: 100%;
+              border-collapse: collapse;
+              margin-top: 16px;
+            }
+            th, td {
+              padding: 12px;
+              text-align: left;
+              border-bottom: 1px solid #e1e1e1;
+            }
+            th {
+              background-color: #f8f9fa;
+              font-weight: 600;
+            }
+            .info-grid {
+              display: grid;
+              grid-template-columns: repeat(auto-fill, minmax(200px, 1fr));
+              gap: 16px;
+              margin-bottom: 24px;
+            }
+
+            .info-item {
+              background-color: #f8f9fa;
+              padding: 12px;
+              border-radius: 4px;
+            }
+            .info-item h4 {
+              margin-top: 0;
+              margin-bottom: 8px;
+              color: var(--primary-color, #4a6da7);
+            }
+            .spinner {
+              border: 4px solid rgba(0, 0, 0, 0.1);
+              width: 36px;
+              height: 36px;
+              border-radius: 50%;
+              border-left-color: var(--primary-color, #4a6da7);
+              animation: spin 1s linear infinite;
+              margin: 20px auto;
+            }
+            @keyframes spin {
+              0% { transform: rotate(0deg); }
+              100% { transform: rotate(360deg); }
+            }
+          </style>
+
+          <div class="card">
+            <h2>Upload Font File</h2>
+            <p>Select a TTF or OTF font file to analyze its properties, or provide a URL.</p>
+
+            <div style="margin-bottom: 16px;">
+              <label style="display: block; margin-bottom: 8px; font-weight: bold;">Font File:</label>
+              <input type="file" id="font-file" accept=".ttf,.otf" ${processing ? 'disabled' : ''}>
+
+              ${fileName ? `
+                <div class="file-info">
+                  Selected file: ${fileName}
+                </div>
+              ` : ''}
+            </div>
+
+            <div style="margin-bottom: 16px;">
+              <label style="display: block; margin-bottom: 8px; font-weight: bold;">Font URL:</label>
+              <input
+                type="url"
+                id="font-url"
+                style="width: 100%; padding: 8px; border: 1px solid #ccc; border-radius: 4px;"
+                value="${this.state.fontUrl || ''}"
+                placeholder="https://example.com/font.ttf"
+                ${processing ? 'disabled' : ''}>
+              <div style="margin-top: 4px; font-size: 0.9em; color: #666;">
+                If both file and URL are provided, the file will be used.
+              </div>
+            </div>
+
+            <div style="margin-top: 16px;">
+              <button id="analyze-btn" ${(!hasFile && !this.state.fontUrl) || processing ? 'disabled' : ''}>
+                ${processing ? 'Processing...' : 'Analyze Font'}
+              </button>
+            </div>
+          </div>
+
+          ${processing ? `
+            <div class="card">
+              <div class="spinner"></div>
+              <p style="text-align: center;">Analyzing font file...</p>
+            </div>
+          ` : ''}
+
+          ${error ? `
+            <div class="card">
+              <div class="error">${error}</div>
+            </div>
+          ` : ''}
+
+          ${result ? `
+            <div class="card">
+              <h2>Font Information</h2>
+
+              <div style="margin-bottom: 20px;">
+                <p><strong>Family Name:</strong> ${result.familyName}</p>
+                <p><strong>Subfamily:</strong> ${result.subfamily}</p>
+                <p><strong>Full Name:</strong> ${result.fullName}</p>
+              </div>
+
+              <div class="info-grid">
+                <div class="info-item">
+                  <h4>Units Per Em (UPM)</h4>
+                  <div>${result.upm}</div>
+                </div>
+
+                <div class="info-item">
+                  <h4>Number of Glyphs</h4>
+                  <div>${result.numGlyphs}</div>
+                </div>
+              </div>
+
+              <h3>Available Tables</h3>
+              <div style="display: flex; flex-wrap: wrap; gap: 8px; margin-bottom: 24px;">
+                ${result.tables.map(table => `
+                  <span style="background-color: #e9ecef; padding: 4px 8px; border-radius: 4px;">${table}</span>
+                `).join('')}
+              </div>
+
+              <h3>Name Table Entries</h3>
+              <table>
+                <thead>
+                  <tr>
+                    <th>Name ID</th>
+                    <th>Platform ID</th>
+                    <th>String</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  ${result.nameTable.map(entry => `
+                    <tr>
+                      <td>${entry.nameId}</td>
+                      <td>${entry.platformId}</td>
+                      <td>${entry.string}</td>
+                    </tr>
+                  `).join('')}
+                </tbody>
+              </table>
+            </div>
+          ` : ''}
+        `;
+
+        this.setupEventListeners();
+      }
+    }
+
+    customElements.define('font-analyzer', FontAnalyzer);
+    });
+  </script>
+</body>
+</html>

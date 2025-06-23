@@ -67,161 +67,95 @@
 
   <py-config>
     packages = ["fonttools"]
+    paths = ["../../src"]
   </py-config>
   
   <py-script>
-from fontTools.ttLib import TTFont
 import io
-import js
-import pyodide.http
+import js # For js.console, js.Uint8Array
+# TTFont and pyodide.http will be used by the imported utilities
+from boabro.boabro import fetch_font_bytes_from_url, analyze_font_data
+# from pyodide.ffi import to_js # Not strictly needed if returning string directly
 
-async def fetch_font_from_url(url):
-    try:
-        # Add custom headers to help with CORS issues
-        headers = {
-            "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/91.0.4472.124 Safari/537.36",
-            "Accept": "*/*",
-            "Accept-Language": "en-US,en;q=0.9"
-        }
-        
-        # List of CORS proxies to try
-        cors_proxies = [
-            "https://corsproxy.io/?url=",
-            "https://api.allorigins.win/raw?url=",
-            "https://cors.eu.org/",
-            "https://xofix.4kb.dev/?url="
-        ]
+# This local version will be removed / refactored (fetch_font_from_url)
 
-        
-        # If it's a GitHub URL, try to use a more direct approach first
-        if "github.com" in url and "raw" in url:
-            # Try to convert to raw.githubusercontent.com if not already
-            if "raw.githubusercontent.com" not in url:
-                # Convert github.com URL to raw.githubusercontent.com
-                raw_url = url.replace("github.com", "raw.githubusercontent.com")
-                raw_url = raw_url.replace("/blob/", "/")
-                print(f"Converted to raw URL: {raw_url}")
-                try:
-                    response = await pyodide.http.pyfetch(raw_url, headers=headers)
-                    if response.status == 200:
-                        return await response.bytes()
-                except Exception as raw_error:
-                    print(f"Raw URL request failed: {str(raw_error)}")
-        
-        # Try each CORS proxy in sequence
-        for proxy in cors_proxies:
-            proxy_url = f"{proxy}{url}"
-            print(f"Trying CORS proxy: {proxy}")
-            try:
-                response = await pyodide.http.pyfetch(proxy_url, headers=headers)
-                if response.status == 200:
-                    return await response.bytes()
-                else:
-                    print(f"Proxy {proxy} request failed with status: {response.status}")
-            except Exception as proxy_error:
-                print(f"Proxy {proxy} request failed: {str(proxy_error)}")
-        
-        # Try direct URL as fallback
-        print("Trying direct URL request")
-        response = await pyodide.http.pyfetch(url, headers=headers)
-        if response.status == 200:
-            return await response.bytes()
-        else:
-            print(f"Direct request failed with status: {response.status}")
-            
-            # Try with no-cors mode as a last resort
-            print("Attempting with no-cors mode")
-            try:
-                response = await pyodide.http.pyfetch(url, headers=headers, mode="no-cors")
-                return await response.bytes()
-            except Exception as no_cors_error:
-                print(f"No-cors request failed: {str(no_cors_error)}")
-        
-        # If we got here, all attempts failed
-        print("All fetch attempts failed")
-        return None
-    except Exception as e:
-        print(f"Error fetching font: {str(e)}")
-        return None
+def _format_analysis_to_html_for_vue(analysis_data: dict) -> str:
+    """
+    Helper to format the structured analysis data from analyze_font_data
+    into the HTML string format expected by this Vue example.
+    """
+    if not analysis_data:
+        return "<p class='error'>No analysis data to format.</p>"
 
-def analyze_font(font_data):
-    # Load the font from bytes
-    font_io = io.BytesIO(font_data)
-    font = TTFont(font_io)
-    
-    # Get UPM value
-    upm = font["head"].unitsPerEm
-    
-    # Get name table entries
-    name_table = font["name"]
-    
-    # Helper to get name
-    def get_name(nameID):
-        entry = name_table.getName(nameID, 3, 1, 0x409) or name_table.getName(nameID, 1, 0, 0)
-        return entry.toUnicode() if entry else "(N/A)"
-    
-    # Create a list to store the name table data
-    name_data = []
-    
-    for record in name_table.names:
-        try:
-            name_id = record.nameID
-            platform_id = record.platformID
-            string = record.toUnicode()
-            name_data.append({"Name ID": name_id, "Platform ID": platform_id, "String": string})
-        except:
-            name_data.append({"Name ID": record.nameID, "Platform ID": record.platformID, "String": "(could not decode)"})
-    
-    # Format the output as HTML
-    output = f"""
+    def get_val(key, default='N/A'): # Helper to safely get values
+        return analysis_data.get(key, default)
+
+    name_table_html_rows = ""
+    if analysis_data.get("nameTableRecords"):
+        for entry in analysis_data["nameTableRecords"]:
+            name_table_html_rows += f"""
+  <tr>
+    <td>{entry.get('nameID', 'N/A')}</td>
+    <td>{entry.get('platformID', 'N/A')}</td>
+    <td>{entry.get('string', 'N/A')}</td>
+  </tr>"""
+
+    output_html = f"""
 <h3>Font Information</h3>
-<p><strong>Family Name:</strong> {get_name(1)}</p>
-<p><strong>Subfamily:</strong> {get_name(2)}</p>
-<p><strong>Full Name:</strong> {get_name(4)}</p>
-<p><strong>Units Per Em (UPM):</strong> {upm}</p>
-<p><strong>Number of Glyphs:</strong> {len(font.getGlyphOrder())}</p>
+<p><strong>Family Name:</strong> {get_val('familyName')}</p>
+<p><strong>Subfamily:</strong> {get_val('subfamily')}</p>
+<p><strong>Full Name:</strong> {get_val('fullName')}</p>
+<p><strong>Units Per Em (UPM):</strong> {get_val('upm')}</p>
+<p><strong>Number of Glyphs:</strong> {get_val('numGlyphs')}</p>
 
 <h3>Name Table Entries</h3>
 <table border='1' cellpadding='5' style='border-collapse: collapse; width: 100%;'>
-  <tr>
-    <th>Name ID</th>
-    <th>Platform ID</th>
-    <th>String</th>
-  </tr>
+  <thead>
+    <tr>
+      <th>Name ID</th>
+      <th>Platform ID</th>
+      <th>String</th>
+    </tr>
+  </thead>
+  <tbody>
+    {name_table_html_rows}
+  </tbody>
+</table>
 """
-    
-    # Add table rows
-    for entry in name_data:
-        output += f"""
-  <tr>
-    <td>{entry['Name ID']}</td>
-    <td>{entry['Platform ID']}</td>
-    <td>{entry['String']}</td>
-  </tr>"""
-    
-    output += "</table>"
-    return output
+    return output_html
 
 # Function to be called from JavaScript for uploaded files
-def process_font(font_data_js):
+def process_font(font_data_js_array, filename="uploaded_font"):
+    """
+    Processes font data from a JS Uint8Array, analyzes it using shared utility,
+    and returns an HTML string suitable for the Vue component.
+    """
+    js.console.log(f"[Python Vue] process_font for {filename}")
     try:
-        # Convert JS Uint8Array to Python bytes
-        font_data = bytes(font_data_js.to_py())
-        result = analyze_font(font_data)
-        return result
+        font_bytes = bytes(font_data_js_array.to_py())
+        analysis_data = analyze_font_data(font_bytes, filename=filename) # from boabro.boabro
+        return _format_analysis_to_html_for_vue(analysis_data)
     except Exception as e:
+        js.console.log(f"[Python Vue] Error in process_font for {filename}: {str(e)}")
         return f"<p class='error'>Error analyzing font: {str(e)}</p>"
 
 # Function to be called from JavaScript for URLs
-async def process_font_url(url):
+async def process_font_url(url_str: str):
+    """
+    Fetches a font from a URL using shared utility, analyzes it,
+    and returns an HTML string suitable for the Vue component.
+    """
+    js.console.log(f"[Python Vue] process_font_url for: {url_str}")
     try:
-        font_data = await fetch_font_from_url(url)
-        if font_data:
-            result = analyze_font(font_data)
-            return result
+        font_bytes = await fetch_font_bytes_from_url(url_str) # from boabro.boabro
+        if font_bytes:
+            filename = url_str.split('/')[-1] if url_str else "font_from_url"
+            analysis_data = analyze_font_data(font_bytes, filename=filename)
+            return _format_analysis_to_html_for_vue(analysis_data)
         else:
-            return "<p class='error'>Error fetching font from URL</p>"
+            return "<p class='error'>Error fetching font from URL (shared utility returned None).</p>"
     except Exception as e:
+        js.console.log(f"[Python Vue] Error in process_font_url for {url_str}: {str(e)}")
         return f"<p class='error'>Error processing font URL: {str(e)}</p>"
   </py-script>
 

@@ -1,0 +1,449 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Font Inspector - PyScript Workers Pool</title>
+  <link href="https://cdn.jsdelivr.net/npm/bootstrap@5.3.2/dist/css/bootstrap.min.css" rel="stylesheet">
+  <link rel="stylesheet" href="https://pyscript.net/releases/2025.3.1/core.css">
+  <script type="module" src="https://pyscript.net/releases/2025.3.1/core.js"></script>
+  <py-config>
+    [[workers]]
+    name = "pool-worker-0"
+    src = "_pyscript-pool-worker.py"
+    packages = ["fonttools"]
+    [[workers]]
+    name = "pool-worker-1"
+    src = "_pyscript-pool-worker.py"
+    packages = ["fonttools"]
+    [[workers]]
+    name = "pool-worker-2"
+    src = "_pyscript-pool-worker.py"
+    packages = ["fonttools"]
+  </py-config>
+</head>
+<body class="bg-gray-100 min-h-screen"> <!-- Added bg-gray-100 for consistency if needed -->
+  <div class="container py-4">
+    <h1 class="mb-4">Font Inspector with Workers Pool</h1>
+
+    <div class="card mb-4">
+      <div class="card-body">
+        <h5 class="card-title">Upload Font Files</h5>
+        <p class="card-text">Select multiple TTF or OTF font files to analyze in parallel.</p>
+
+        <div class="mb-3">
+          <input type="file" class="form-control" id="font-files" multiple accept=".ttf,.otf">
+        </div>
+
+        <div class="mb-3">
+          <label for="font-url" class="form-label">Font URL:</label>
+          <input type="url" class="form-control" id="font-url"
+                 placeholder="https://example.com/font.ttf"
+                 value="https://github.com/google/fonts/raw/refs/heads/main/ofl/abrilfatface/AbrilFatface-Regular.ttf">
+          <div class="form-text">You can also provide a URL to a font file. If both files and URL are provided, all will be processed.</div>
+        </div>
+
+        <button id="analyze-btn" class="btn btn-primary">
+          Analyze Fonts
+        </button>
+      </div>
+    </div>
+
+    <div id="status" class="alert alert-info d-none">
+      Processing fonts...
+    </div>
+
+    <div id="results-container"></div>
+  </div>
+
+  <script type="py" id="main-py-script">
+from js import document, window, pyscript, Object, console
+from pyodide.ffi import create_proxy
+
+class PyScriptWorkersPool:
+    def __init__(self, num_workers=3):
+        self.num_workers = num_workers
+        self.workers = []
+        self.task_queue = []
+        self.active_workers_count = 0 # Renamed to avoid conflict with activeWorkers getter
+        self.next_task_id = 1
+        self.task_callbacks = {} # Using dict instead of Map for easier Pyodide interop if needed
+
+        # This initialization will be called by JavaScript once PyScript is ready
+        # and worker proxies are available.
+        # self.initialize_workers_from_js() # Called from JS after pyscript ready
+
+    def log(self, message):
+        # Helper for logging from the pool manager
+        console.log(f"[PyScriptWorkersPool] {message}")
+        # Optionally, could also update a debug div on the page if one was provided
+
+    def initialize_workers_from_js(self, worker_proxies_js_array):
+        self.log(f"Initializing {len(worker_proxies_js_array)} PyScript workers...")
+        for i in range(len(worker_proxies_js_array)):
+            worker_proxy = worker_proxies_js_array[i] # This is already the .sync() version from JS
+
+            # The onmessage handler for each worker proxy
+            # It needs to be a unique proxy for each worker if it captures 'i' or 'worker_proxy'
+            # For simplicity, we can make a generic handler that uses the event data.
+            # The original JS code attached onmessage directly to the worker.
+            # We'll let JS handle attaching the onmessage after getting the worker proxy.
+            worker_proxy.isReady = False # Custom property to track readiness
+            worker_proxy.isBusy = False  # Custom property
+            worker_proxy.id = f"pool-worker-{i}" # Assign an ID for logging
+
+            # The original JS sets up onmessage. We need to ensure the JS side can do this.
+            # The worker_proxy obtained from .sync() is a JS object that behaves like a Worker.
+            self.workers.append(worker_proxy)
+
+        self.log(f"{len(self.workers)} workers prepared (waiting for 'ready' message from each).")
+        # Note: Actual readiness is signaled by each worker posting a 'ready' message.
+
+    def process_queue(self):
+        if not self.task_queue:
+            return
+
+        available_worker = None
+        for worker in self.workers:
+            if worker.isReady and not worker.isBusy:
+                available_worker = worker
+                break
+
+        if not available_worker:
+            self.log("No available workers to process queue.")
+            return
+
+        task = self.task_queue.pop(0) # Get first task
+
+        available_worker.isBusy = True
+        self.active_workers_count += 1
+
+        self.log(f"Assigning task {task['id']} (type: {task['type']}) to worker {available_worker.id}")
+        # Data needs to be structured as JS objects for postMessage
+        # If fontData is ArrayBuffer, it can be transferred.
+        if 'fontData' in task and hasattr(task['fontData'], 'byteLength'): # Check if it's ArrayBuffer-like
+             available_worker.postMessage(to_js(task, dict_converter=Object.fromEntries), [task['fontData']])
+        else:
+             available_worker.postMessage(to_js(task, dict_converter=Object.fromEntries))
+
+
+    def run_task(self, task_details_js):
+        # task_details_js is expected to be a JS object with {type, fontData, fileName, url}
+        task_details = task_details_js.to_py() # Convert from JS object if called from JS directly
+
+        task_id = self.next_task_id
+        self.next_task_id += 1
+
+        # The promise creation and callback storage must happen in JS
+        # This Python method will just enqueue the task
+
+        # Prepare the task object for the worker
+        worker_task = {
+            "id": task_id,
+            "type": task_details.get("type", "analyze") # Default to analyze
+        }
+        if "fontData" in task_details: # fontData should be ArrayBuffer
+            worker_task["fontData"] = task_details["fontData"]
+        if "fileName" in task_details:
+            worker_task["fileName"] = task_details["fileName"]
+        if "url" in task_details:
+            worker_task["url"] = task_details["url"]
+
+        self.task_queue.append(worker_task)
+        self.log(f"Queued task {task_id} (type: {worker_task['type']}). Queue size: {len(self.task_queue)}")
+
+        # JS will handle promise resolution via the onmessage handler
+        # Return task_id so JS can map it to its promise
+        return task_id
+
+    # Properties for JS to query (if needed)
+    @property
+    def is_idle(self):
+        return self.active_workers_count == 0 and not self.task_queue
+
+    @property
+    def active_tasks_count(self):
+        return self.active_workers_count + len(self.task_queue)
+
+    def terminate_all_workers(self):
+        self.log("Terminating all workers.")
+        for worker in self.workers:
+            if hasattr(worker, 'terminate') and callable(worker.terminate):
+                 worker.terminate() # PyScript worker proxies should have terminate
+        self.workers = []
+        self.task_queue = []
+        self.task_callbacks = {}
+
+# Make the class available to JavaScript
+window.PyScriptWorkersPool = PyScriptWorkersPool
+
+# Expose a function for JS to call for initializing the pool with worker proxies
+def create_pool_instance_py(num_workers_js):
+    pool = PyScriptWorkersPool(num_workers_js)
+    window.pyWorkersPool = pool # Make the instance globally available
+    return pool # Return the instance (as PyProxy)
+
+window.createPoolInstance = create_proxy(create_pool_instance_py)
+
+  </script>
+
+  <script>
+    // Main application code (JavaScript)
+    let workersPool; // Will be an instance of the Python PyScriptWorkersPool class (via PyProxy)
+    let pyScriptReady = false;
+
+    document.addEventListener('DOMContentLoaded', () => {
+      const statusElement = document.getElementById('status');
+      statusElement.textContent = 'Loading PyScript and preparing workers...';
+      console.log("[JS Main] DOMContentLoaded. PyScript is loading.");
+    });
+
+    document.addEventListener('py:ready', () => {
+        pyScriptReady = true;
+        console.log("[JS Main] PyScript ready event fired.");
+        const statusElement = document.getElementById('status');
+        statusElement.textContent = 'PyScript loaded. Initializing worker pool...';
+
+        const numWorkers = 3; // Or get from config
+        window.createPoolInstance(numWorkers); // Calls Python function to create pool instance
+
+        // pyWorkersPool is now the Python pool instance (a PyProxy)
+        workersPool = window.pyWorkersPool;
+
+        // Get worker proxies from PyScript runtime and pass to Python pool for initialization
+        const worker_proxies_js = [];
+        for (let i = 0; i < numWorkers; i++) {
+            const worker_proxy_sync = pyscript.runtime.workers.get(f`pool-worker-${i}`).sync;
+            worker_proxy_sync.onmessage = handleWorkerMessage; // Attach JS message handler
+            worker_proxies_js.push(worker_proxy_sync);
+        }
+        workersPool.initialize_workers_from_js(worker_proxies_js);
+
+        statusElement.textContent = `Worker pool initialized with ${numWorkers} workers. Waiting for worker ready signals.`;
+        initializeUI();
+    });
+
+    function handleWorkerMessage(event) {
+        const { type, id, success, data, error, fileName } = event.data; // Data from PyScript worker is already JS object
+        console.log(`[JS Main] Received message from worker: type=${type}, id=${id}`);
+
+        if (type === 'ready') {
+            // Find the worker that sent this (not straightforward with current setup,
+            // as 'event.target' might not be the specific worker instance in workersPool.workers easily)
+            // For now, just assume workers become ready and pool handles it.
+            // The Python pool class's processQueue will pick up ready workers.
+            workersPool.process_queue();
+        } else if (type === 'result') {
+            const callback = workersPool.task_callbacks[id]; // Accessing dict from PyProxy
+            if (callback) {
+                callback(success, data, error); // Call the JS promise resolve/reject
+                delete workersPool.task_callbacks[id];
+            }
+
+            // Find the worker that finished (this is tricky as event.target is the proxy)
+            // The Python pool should manage isBusy state internally.
+            // For now, assume the Python side handles worker state.
+            // We just need to decrement active_workers_count and process queue.
+            workersPool.active_workers_count -= 1;
+            workersPool.process_queue();
+        } else if (type === 'log') { // If worker sends log messages
+            console.log(`[WorkerLog] ${data}`);
+        }
+    }
+
+
+    function initializeUI() {
+        const fileInput = document.getElementById('font-files');
+        const analyzeButton = document.getElementById('analyze-btn');
+        const statusElement = document.getElementById('status');
+        const resultsContainer = document.getElementById('results-container');
+
+        analyzeButton.disabled = false; // Enable button now that pool is being set up
+        statusElement.textContent = 'Ready. Select files or provide a URL.';
+
+
+        analyzeButton.addEventListener('click', async () => {
+            if (!workersPool) {
+                alert("Worker pool not initialized yet.");
+                return;
+            }
+            const files = fileInput.files;
+            const url = document.getElementById('font-url').value.trim();
+
+            if (files.length === 0 && !url) {
+                alert('Please select at least one font file or provide a URL.');
+                return;
+            }
+
+            resultsContainer.innerHTML = '';
+            const totalTasks = files.length + (url ? 1 : 0);
+            statusElement.textContent = `Processing ${totalTasks} font${totalTasks > 1 ? 's' : ''}...`;
+            statusElement.classList.remove('d-none');
+
+            const progressContainer = document.createElement('div');
+            progressContainer.className = 'progress mb-4';
+            const progressBar = document.createElement('div');
+            progressBar.className = 'progress-bar';
+            progressBar.style.width = '0%';
+            progressBar.setAttribute('role', 'progressbar');
+            progressBar.setAttribute('aria-valuenow', '0');
+            progressBar.setAttribute('aria-valuemin', '0');
+            progressBar.setAttribute('aria-valuemax', totalTasks.toString());
+            progressContainer.appendChild(progressBar);
+            if (statusElement.querySelector('.progress')) {
+                statusElement.querySelector('.progress').remove();
+            }
+            statusElement.appendChild(progressContainer);
+
+            const taskPromises = [];
+            let completed = 0;
+
+            const updateProgress = () => {
+                completed++;
+                const progress = (completed / totalTasks) * 100;
+                progressBar.style.width = `${progress}%`;
+                progressBar.setAttribute('aria-valuenow', completed.toString());
+                progressBar.textContent = `${completed} / ${totalTasks}`;
+            };
+
+            function createTaskPromise(taskDetailsForPython) {
+                return new Promise(async (resolve, reject) => {
+                    // Call Python's run_task, it returns a task_id
+                    const taskId = await workersPool.run_task(taskDetailsForPython);
+
+                    // Store JS resolve/reject for this task_id
+                    // The Python pool's onmessage handler will call this via the task_callbacks map
+                    workersPool.task_callbacks[taskId] = (success, data, error_msg) => {
+                        if (success) {
+                            resolve(data);
+                        } else {
+                            // Include fileName in the error object for better reporting
+                            const errorObj = new Error(error_msg);
+                            errorObj.fileName = taskDetailsForPython.fileName || taskDetailsForPython.url;
+                            reject(errorObj);
+                        }
+                    };
+                });
+            }
+
+            for (const file of files) {
+                const fileReader = new FileReader();
+                const promise = new Promise((resolve, reject) => {
+                    fileReader.onload = async () => {
+                        try {
+                            const arrayBuffer = fileReader.result; // This is ArrayBuffer
+                            const taskDetails = { type: 'analyze', fontData: arrayBuffer, fileName: file.name };
+                            const result = await createTaskPromise(taskDetails);
+                            resolve(result);
+                        } catch (e) {
+                            reject(e);
+                        } finally {
+                            updateProgress();
+                        }
+                    };
+                    fileReader.onerror = () => {
+                        const readError = new Error(`Error reading file: ${file.name}`);
+                        readError.fileName = file.name;
+                        reject(readError);
+                        updateProgress(); // Count as completed even if error
+                    };
+                });
+                fileReader.readAsArrayBuffer(file);
+                taskPromises.push(promise);
+            }
+
+            if (url) {
+                const taskDetails = { type: 'analyze_url', url: url, fileName: url }; // fileName for error reporting
+                taskPromises.push(
+                    createTaskPromise(taskDetails)
+                        .then(result => { updateProgress(); return result; })
+                        .catch(error => { updateProgress(); throw error; })
+                );
+            }
+
+            const allResults = await Promise.allSettled(taskPromises);
+
+            statusElement.classList.add('d-none');
+            statusElement.removeChild(progressContainer); // Clean up progress bar
+
+            const successfulResults = [];
+            const errorMessages = [];
+
+            allResults.forEach(res => {
+                if (res.status === 'fulfilled') {
+                    successfulResults.push(res.value);
+                } else {
+                    errorMessages.push({
+                        fileName: res.reason.fileName || "Unknown source", // Get fileName from error object
+                        error: res.reason.message
+                    });
+                }
+            });
+
+            displayResultsAndErrors(resultsContainer, successfulResults, errorMessages);
+        });
+    }
+
+    function displayResultsAndErrors(container, results, errors) {
+        container.innerHTML = ''; // Clear previous
+        if (results.length > 0) {
+            const resultsCard = document.createElement('div');
+            resultsCard.className = 'card mb-4';
+            const cardBody = document.createElement('div');
+            cardBody.className = 'card-body';
+            const cardTitle = document.createElement('h5');
+            cardTitle.className = 'card-title';
+            cardTitle.textContent = 'Analysis Results';
+            cardBody.appendChild(cardTitle);
+            const table = document.createElement('table');
+            table.className = 'table table-striped table-hover';
+            const thead = document.createElement('thead');
+            thead.innerHTML = `
+                <tr>
+                <th>Font Name</th><th>Family</th><th>Style</th><th>UPM</th><th>Glyphs</th><th>Tables</th>
+                </tr>`;
+            const tbody = document.createElement('tbody');
+            results.forEach(result => {
+                if (!result) return; // Skip if result is undefined
+                const row = document.createElement('tr');
+                row.innerHTML = `
+                    <td>${result.fileName || 'N/A'}</td>
+                    <td>${result.familyName || 'N/A'}</td>
+                    <td>${result.subfamily || 'N/A'}</td>
+                    <td>${result.upm || 'N/A'}</td>
+                    <td>${result.numGlyphs || 'N/A'}</td>
+                    <td>${(result.tables || []).slice(0,5).join(', ')}${(result.tables || []).length > 5 ? '...' : ''}</td>`;
+                tbody.appendChild(row);
+            });
+            table.appendChild(thead);
+            table.appendChild(tbody);
+            cardBody.appendChild(table);
+            resultsCard.appendChild(cardBody);
+            container.appendChild(resultsCard);
+        }
+
+        if (errors.length > 0) {
+            const errorsCard = document.createElement('div');
+            errorsCard.className = 'card mb-4';
+            const cardBody = document.createElement('div');
+            cardBody.className = 'card-body';
+            const cardTitle = document.createElement('h5');
+            cardTitle.className = 'card-title text-danger';
+            cardTitle.textContent = 'Errors';
+            cardBody.appendChild(cardTitle);
+            const errorsList = document.createElement('ul');
+            errorsList.className = 'list-group';
+            errors.forEach(error => {
+                const errorItem = document.createElement('li');
+                errorItem.className = 'list-group-item list-group-item-danger';
+                errorItem.innerHTML = `<strong>${error.fileName}:</strong> ${error.error}`;
+                errorsList.appendChild(errorItem);
+            });
+            cardBody.appendChild(errorsList);
+            errorsCard.appendChild(cardBody);
+            container.appendChild(errorsCard);
+        }
+    }
+  </script>
+</body>
+</html>

@@ -177,14 +177,16 @@
     </div>
 
     <script type="py"
-            config='{"packages":["puepy","fonttools"]}'>
+            config='{"packages":["puepy","fonttools"], "paths": ["../../src"]}'>
       from puepy import Page, Application, t
       import io
       import traceback
-      from fontTools.ttLib import TTFont
-      from js import document, console, fetch, Uint8Array, URL, window
+      # from fontTools.ttLib import TTFont # No longer directly used here
+      from js import document, console, Uint8Array, URL, window # Removed 'fetch' as it's handled by boabro.py
       from pyodide.ffi import create_proxy, to_js
       import asyncio
+
+      from boabro.boabro import analyze_font_data, fetch_font_bytes_from_url
 
       def debug_log(message):
           debug_div = document.getElementById("debug")
@@ -403,224 +405,187 @@
               # Run the attach handler
               attach_handler()
 
-          async def fetch_font_from_url(self, url):
-              debug_log(f"Fetching font from URL: {url}")
-              
-              # Custom headers to help with CORS issues
-              headers = {
-                  "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/91.0.4472.124 Safari/537.36",
-                  "Accept": "*/*",
-                  "Accept-Language": "en-US,en;q=0.9",
-                  "Referer": window.location.href,
-                  "Origin": window.location.origin
-              }
-              
-              # Convert headers to JS object
-              js_headers = to_js(headers)
-              
-              # List of CORS proxies to try
-              cors_proxies = [
-                  "https://corsproxy.io/?url=",
-                  "https://api.allorigins.win/raw?url=",
-                  "https://cors.eu.org/",
-                  "https://xofix.4kb.dev/?url="
-              ]
-              
+          async def _fetch_font_from_url_wrapper(self, url):
+              # This is a wrapper around the shared fetch_font_bytes_from_url
+              # to integrate with PuePy's state management for errors.
+              self.state["error"] = "" # Clear previous error
+              debug_log(f"FrankenUI: Fetching font from URL wrapper: {url}")
               try:
-                  # If it's a GitHub URL, try to use a more direct approach first
-                  if "github.com" in url:
-                      # Try to convert to raw.githubusercontent.com if not already
-                      if "raw.githubusercontent.com" not in url:
-                          # Convert github.com URL to raw.githubusercontent.com
-                          raw_url = url.replace("github.com", "raw.githubusercontent.com")
-                          raw_url = raw_url.replace("/blob/", "/")
-                          debug_log(f"Converted to raw URL: {raw_url}")
-                          try:
-                              response = await fetch(raw_url, {"headers": js_headers})
-                              if response.ok:
-                                  debug_log("Raw URL request successful")
-                                  array_buffer = await response.arrayBuffer()
-                                  return array_buffer.to_bytes()
-                          except Exception as raw_error:
-                              debug_log(f"Raw URL request failed: {str(raw_error)}")
-                  
-                  # Try each CORS proxy in sequence
-                  for proxy in cors_proxies:
-                      proxy_url = f"{proxy}{url}"
-                      debug_log(f"Trying CORS proxy: {proxy}")
-                      try:
-                          response = await fetch(proxy_url, {"headers": js_headers})
-                          if response.ok:
-                              debug_log(f"Proxy {proxy} request successful")
-                              array_buffer = await response.arrayBuffer()
-                              return array_buffer.to_bytes()
-                          else:
-                              debug_log(f"Proxy {proxy} request failed with status: {response.status}")
-                      except Exception as proxy_error:
-                          debug_log(f"Proxy {proxy} request failed: {str(proxy_error)}")
-                  
-                  # Try direct URL as fallback
-                  debug_log("Trying direct URL request")
-                  response = await fetch(url, {"headers": js_headers})
-                  
-                  if response.ok:
-                      debug_log("Direct request successful")
-                      array_buffer = await response.arrayBuffer()
-                      return array_buffer.to_bytes()
+                  font_bytes = await fetch_font_bytes_from_url(url)
+                  if font_bytes:
+                      debug_log(f"FrankenUI: Successfully fetched {len(font_bytes)} bytes from URL.")
+                      return font_bytes
                   else:
-                      debug_log(f"Direct request failed with status: {response.status}")
-                      
-                      # Try with no-cors mode as last resort
-                      debug_log("Trying with no-cors mode")
-                      try:
-                          fetch_options = {"mode": "no-cors", "headers": js_headers}
-                          response = await fetch(url, fetch_options)
-                          array_buffer = await response.arrayBuffer()
-                          return array_buffer.to_bytes()
-                      except Exception as e:
-                          debug_log(f"No-cors request failed: {str(e)}")
-              
-                  # If we got here, all attempts failed
-                  debug_log("All fetch attempts failed")
-                  raise Exception("Failed to fetch font. CORS policy may be blocking the request. Try downloading the font and uploading it directly.")
-              
+                      # fetch_font_bytes_from_url should have logged specific error via debug_log
+                      error_msg = "Failed to fetch font from URL. CORS or network issue likely. Check browser console for details."
+                      debug_log(f"FrankenUI: {error_msg}")
+                      self.state["error"] = error_msg
+                      return None
               except Exception as e:
-                  debug_log(f"Error fetching font: {str(e)}")
+                  error_msg = f"FrankenUI: Error in _fetch_font_from_url_wrapper: {str(e)}"
+                  debug_log(error_msg)
                   debug_log(traceback.format_exc())
-                  raise Exception(f"Error fetching font: {str(e)}. Try downloading the font and uploading it directly.")
+                  self.state["error"] = error_msg
+                  return None
 
           def on_process_file_click(self, event):
-              debug_log("Process file button clicked")
-              self.state["active_tab"] = "file"
-              
-              # Get file directly from the input element
-              upload = document.getElementById("font-upload")
-              if upload and upload.files and upload.files.length > 0:
-                  debug_log("Found file in input element")
-                  self.state["is_processing"] = True
+              debug_log("FrankenUI: Process file button clicked")
+              self.state["active_tab"] = "file" # Ensure correct tab is active
+              self.state["error"] = ""
+              self.state["info"] = ""
 
-                  # Access file directly from the input element
-                  async def process_file():
-                      try:
-                          file = upload.files.item(0)
-                          debug_log(f"Processing file: {file.name}")
+              upload_element = document.getElementById("font-upload")
+              if not (upload_element and upload_element.files and upload_element.files.length > 0):
+                  # If no file is selected in the input, check if self.state["file_data"] was already populated
+                  if not self.state.get("file_data"):
+                      self.state["error"] = "No file selected. Please choose a font file."
+                      debug_log(f"FrankenUI: {self.state['error']}")
+                      return
+                  else:
+                      debug_log("FrankenUI: Using previously stored file data.")
+                      # Proceed to process existing self.state["file_data"]
+                      self.state["is_processing"] = True
+                      # Call process_font directly as file_data should already be bytes
+                      filename = getattr(upload_element.files.item(0), 'name', 'uploaded_file.dat') if upload_element.files.length >0 else "cached_file.dat"
+                      self._process_font_py_logic(filename)
+                      # _process_font_py_logic will set is_processing to False
+                      return
 
-                          # Read file data
-                          array_buffer = await file.arrayBuffer()
-                          data = array_buffer.to_bytes()
-                          debug_log(f"Read {len(data)} bytes")
-
-                          # Store data for processing
-                          self.state["file_data"] = data
-
-                          # Process immediately
-                          self.process_font()
-                      except Exception as e:
-                          debug_log(f"Error accessing file: {str(e)}")
-                          debug_log(traceback.format_exc())
-                          self.state["error"] = f"Error accessing file: {str(e)}"
-                      finally:
-                          self.state["is_processing"] = False
-
-                  # Run the async function
-                  asyncio.ensure_future(process_file())
-                  return
-
-              # Fall back to using stored data
-              if not self.state["file_data"]:
-                  self.state["error"] = "No file data. Please select a font file first."
-                  return
-
+              # A file is selected in the input, process it
               self.state["is_processing"] = True
-              self.process_font()
-              self.state["is_processing"] = False
+
+              async def process_selected_file_async():
+                  try:
+                      file = upload_element.files.item(0)
+                      filename = file.name
+                      debug_log(f"FrankenUI: Reading selected file: {filename}")
+
+                      array_buffer = await file.arrayBuffer()
+                      font_bytes = array_buffer.to_bytes()
+                      debug_log(f"FrankenUI: Read {len(font_bytes)} bytes from {filename}")
+
+                      self.state["file_data"] = font_bytes # Store Python bytes
+                      self._process_font_py_logic(filename) # This will handle analysis and state updates
+
+                  except Exception as e:
+                      error_msg = f"FrankenUI: Error accessing or reading file: {str(e)}"
+                      debug_log(error_msg)
+                      debug_log(traceback.format_exc())
+                      self.state["error"] = error_msg
+                      self.state["is_processing"] = False # Ensure processing is stopped
+
+              asyncio.ensure_future(process_selected_file_async())
 
           def on_process_url_click(self, event):
-              debug_log("Process URL button clicked")
-              self.state["active_tab"] = "url"
-              
-              if not self.state["font_url"]:
+              debug_log("FrankenUI: Process URL button clicked")
+              self.state["active_tab"] = "url" # Ensure correct tab is active
+              self.state["error"] = ""
+              self.state["info"] = ""
+
+              font_url_value = self.state.get("font_url", "").strip()
+              if not font_url_value:
                   self.state["error"] = "Please enter a font URL."
+                  debug_log(f"FrankenUI: {self.state['error']}")
                   return
               
               self.state["is_processing"] = True
               
-              async def process_url():
+              async def process_url_async():
                   try:
-                      debug_log(f"Processing URL: {self.state['font_url']}")
-                      data = await self.fetch_font_from_url(self.state["font_url"])
-                      debug_log(f"Fetched {len(data)} bytes from URL")
+                      debug_log(f"FrankenUI: Attempting to fetch from URL: {font_url_value}")
+                      font_bytes = await self._fetch_font_from_url_wrapper(font_url_value)
                       
-                      # Store data for processing
-                      self.state["file_data"] = data
-                      
-                      # Process immediately
-                      self.process_font()
+                      if font_bytes:
+                          self.state["file_data"] = font_bytes
+                          filename_from_url = font_url_value.split('/')[-1]
+                          self._process_font_py_logic(filename_from_url) # This handles analysis
+                      else:
+                          # Error state should be set by _fetch_font_from_url_wrapper
+                          debug_log(f"FrankenUI: Fetching from URL {font_url_value} failed.")
+                          self.state["is_processing"] = False # Ensure processing is stopped
+
                   except Exception as e:
-                      debug_log(f"Error fetching font from URL: {str(e)}")
+                      # This catches errors from _fetch_font_from_url_wrapper or subsequent logic
+                      error_msg = f"FrankenUI: Error processing URL {font_url_value}: {str(e)}"
+                      debug_log(error_msg)
                       debug_log(traceback.format_exc())
-                      self.state["error"] = f"Error fetching font from URL: {str(e)}"
-                  finally:
-                      self.state["is_processing"] = False
+                      self.state["error"] = error_msg
+                      self.state["is_processing"] = False # Ensure processing is stopped
               
-              # Run the async function
-              asyncio.ensure_future(process_url())
+              asyncio.ensure_future(process_url_async())
 
           def on_reset_click(self, event):
-              debug_log("Reset clicked")
+              debug_log("FrankenUI: Reset clicked")
               self.state["info"] = ""
               self.state["error"] = ""
               self.state["file_data"] = None
               self.state["is_processing"] = False
+              self.state["font_url"] = "https://github.com/google/fonts/raw/refs/heads/main/ofl/abrilfatface/AbrilFatface-Regular.ttf" # Reset URL
 
-              # Reset file input
-              upload = document.getElementById("font-upload")
-              if upload:
-                  upload.value = ""
-                  
-              # Reset file name display
+              upload_element = document.getElementById("font-upload")
+              if upload_element:
+                  upload_element.value = "" # Clear the file input
               file_name_display = document.getElementById("file-name-display")
               if file_name_display:
                   file_name_display.textContent = "No file chosen"
 
-          def process_font(self):
-              debug_log("Processing font data")
+          def _process_font_py_logic(self, filename="font_file.dat"):
+              # Renamed from process_font to avoid confusion with JS-called process_font in other examples
+              # This is the core Python logic for analyzing font_bytes stored in self.state["file_data"]
+              debug_log(f"FrankenUI: _process_font_py_logic for: {filename}")
+              self.state["error"] = "" # Clear previous errors
+
+              if not self.state.get("file_data"):
+                  self.state["error"] = "No font data available for processing."
+                  debug_log(f"FrankenUI: {self.state['error']}")
+                  self.state["is_processing"] = False
+                  return
+
               try:
-                  # Process font data
-                  font_data = io.BytesIO(self.state["file_data"])
-                  font = TTFont(font_data)
-                  debug_log("Font loaded successfully")
+                  font_bytes = self.state["file_data"]
+                  analysis_result = analyze_font_data(font_bytes, filename) # Call shared function
 
-                  # Extract name table
-                  names = font["name"]
+                  if "error" in analysis_result:
+                      self.state["error"] = analysis_result["error"]
+                      debug_log(f"FrankenUI: Analysis error: {self.state['error']}")
+                      self.state["info"] = ""
+                  else:
+                      # Format the result for display (similar to original but using new data structure)
+                      display_info = []
+                      name_details = analysis_result.get("name", {})
+                      head_details = analysis_result.get("head", {})
 
-                  # Helper to get name
-                  def get_name(nameID):
-                      entry = names.getName(nameID, 3, 1, 0x409) or names.getName(nameID, 1, 0, 0)
-                      return entry.toStr() if entry else "(N/A)"
+                      display_info.append(f"Family Name: {name_details.get('font_family', 'N/A')}")
+                      display_info.append(f"Subfamily: {name_details.get('font_subfamily', 'N/A')}")
+                      display_info.append(f"Full Name: {name_details.get('full_name', 'N/A')}")
+                      display_info.append(f"Version: {name_details.get('version', 'N/A')}")
+                      display_info.append(f"PostScript Name: {name_details.get('postscript_name', 'N/A')}")
 
-                  # Basic font info
-                  info = [
-                      f"Family Name: {get_name(1)}",
-                      f"Subfamily: {get_name(2)}",
-                      f"Full Name: {get_name(4)}",
-                      f"Units Per Em: {font['head'].unitsPerEm}",
-                      f"Tables: {', '.join(sorted(font.keys()))}",
-                      f"Number of Glyphs: {len(font.getGlyphOrder())}",
-                  ]
+                      display_info.append(f"Units Per Em: {head_details.get('unitsPerEm', 'N/A')}")
 
-                  # Update state with info
-                  self.state["info"] = "\n".join(info)
-                  self.state["error"] = ""
-                  debug_log("Font info extracted")
+                      num_glyphs = "N/A"
+                      if "glyf" in analysis_result and "num_glyphs" in analysis_result["glyf"]:
+                          num_glyphs = analysis_result["glyf"]["num_glyphs"]
+                      elif "CFF " in analysis_result and analysis_result["CFF "].get("top_dict_data"):
+                          num_glyphs = analysis_result["CFF "]["top_dict_data"].get("num_glyphs", "N/A")
+                      display_info.append(f"Number of Glyphs: {num_glyphs}")
+
+                      display_info.append(f"Tables: {', '.join(sorted(analysis_result.get('tables', [])))}")
+
+                      # Could add more details from analysis_result if needed
+                      # For example, OpenType features, specific table record details etc.
+
+                      self.state["info"] = "\n".join(display_info)
+                      debug_log("FrankenUI: Font info extracted successfully.")
 
               except Exception as e:
-                  error_msg = f"Error processing font: {str(e)}"
+                  error_msg = f"FrankenUI: Error in _process_font_py_logic: {str(e)}"
                   debug_log(error_msg)
                   debug_log(traceback.format_exc())
                   self.state["error"] = error_msg
+                  self.state["info"] = ""
               finally:
-                  self.state["is_processing"] = False
+                  self.state["is_processing"] = False # Ensure processing is stopped
 
       app.mount("#app")
       debug_log("App mounted")

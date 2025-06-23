@@ -1,0 +1,6 @@
+# For local development and linting/formatting/testing
+ruff>=0.1.0 # Using a version from pyproject.toml, can be more specific if needed
+# Add other dev tools if necessary, e.g., pre-commit, pytest
+# For now, just ruff for CI and manual linting.
+# pytest is in pyproject.toml's [project.optional-dependencies.test]
+# pre-commit is in pyproject.toml's [project.optional-dependencies.dev]

@@ -319,13 +319,16 @@
   });
 </script>
 
-<script type="py" config='{"packages":["puepy","fonttools"]}'>
+<script type="py" config='{"packages":["puepy","fonttools"], "paths": ["../../src"]}'>
 from puepy import Page, Application, t
 import io
 import traceback
-from fontTools.ttLib import TTFont
+# from fontTools.ttLib import TTFont # No longer directly used
 from js import document, console
 from pyodide.ffi import create_proxy
+import asyncio # Added for async operations in event handlers
+
+from boabro.boabro import analyze_font_data, fetch_font_bytes_from_url
 
 def debug_log(message):
     debug_div = document.getElementById("debug")
@@ -524,245 +527,212 @@ class FontInspector(Page):
         # Run the attach handler
         attach_handler()
 
-    async def fetch_font_from_url(self, url):
-        debug_log(f"Fetching font from URL: {url}")
-        import pyodide.http
-        
+    async def _fetch_font_from_url_wrapper(self, url):
+        self.state["error"] = ""
+        debug_log(f"Bootstrap: Fetching font from URL wrapper: {url}")
         try:
-            # Add custom headers to help with CORS issues
-            headers = {
-                "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/91.0.4472.124 Safari/537.36",
-                "Accept": "*/*",
-                "Accept-Language": "en-US,en;q=0.9",
-                "Referer": "https://127.0.0.1:8081/",
-                "Origin": "https://127.0.0.1:8081"
-            }
-            
-            debug_log(f"Sending request with custom headers")
-            
-            # Try with multiple CORS proxies in sequence
-            cors_proxies = [
-                "https://corsproxy.io/?url=",
-                "https://api.allorigins.win/raw?url=",
-                "https://cors.eu.org/",
-                "https://xofix.4kb.dev/?url="
-            ]
-            
-            # If it's a GitHub URL, try to use a more direct approach first
-            if "github.com" in url and "raw" in url:
-                # Try to convert to raw.githubusercontent.com if not already
-                if "raw.githubusercontent.com" not in url:
-                    # Convert github.com URL to raw.githubusercontent.com
-                    raw_url = url.replace("github.com", "raw.githubusercontent.com")
-                    raw_url = raw_url.replace("/blob/", "/")
-                    debug_log(f"Converted to raw URL: {raw_url}")
-                    try:
-                        response = await pyodide.http.pyfetch(raw_url, headers=headers)
-                        if response.status == 200:
-                            font_data = await response.bytes()
-                            debug_log(f"Successfully fetched {len(font_data)} bytes from raw URL")
-                            return font_data
-                    except Exception as raw_error:
-                        debug_log(f"Raw URL request failed: {str(raw_error)}")
-            
-            # Try each CORS proxy in sequence
-            for proxy in cors_proxies:
-                proxy_url = f"{proxy}{url}"
-                debug_log(f"Trying CORS proxy: {proxy_url}")
-                try:
-                    response = await pyodide.http.pyfetch(proxy_url, headers=headers)
-                    if response.status == 200:
-                        font_data = await response.bytes()
-                        debug_log(f"Successfully fetched {len(font_data)} bytes from proxy: {proxy}")
-                        return font_data
-                    else:
-                        debug_log(f"Proxy {proxy} request failed with status {response.status}")
-                except Exception as proxy_error:
-                    debug_log(f"Proxy {proxy} request failed: {str(proxy_error)}")
-            
-            # Try direct request with custom headers as fallback
-            debug_log("Trying direct URL request")
-            try:
-                response = await pyodide.http.pyfetch(url, headers=headers)
-                if response.status == 200:
-                    font_data = await response.bytes()
-                    debug_log(f"Successfully fetched {len(font_data)} bytes from direct URL")
-                    return font_data
-                else:
-                    debug_log(f"Direct request failed with status {response.status}")
-                    
-                    # Try with no-cors mode as a last resort
-                    debug_log("Attempting with no-cors mode")
-                    try:
-                        response = await pyodide.http.pyfetch(url, headers=headers, mode="no-cors")
-                        font_data = await response.bytes()
-                        debug_log(f"Successfully fetched {len(font_data)} bytes with no-cors mode")
-                        return font_data
-                    except Exception as no_cors_error:
-                        debug_log(f"No-cors request failed: {str(no_cors_error)}")
-            except Exception as direct_error:
-                debug_log(f"Direct request failed: {str(direct_error)}")
-            
-            # If we got here, all attempts failed
-            self.state["error"] = f"Failed to fetch font. CORS policy may be blocking the request. Try downloading the font and uploading it directly."
-            return None
-                
+            font_bytes = await fetch_font_bytes_from_url(url) # Shared function
+            if font_bytes:
+                debug_log(f"Bootstrap: Successfully fetched {len(font_bytes)} bytes from URL.")
+                return font_bytes
+            else:
+                error_msg = "Failed to fetch font from URL. CORS or network issue likely. Check browser console for details."
+                debug_log(f"Bootstrap: {error_msg}")
+                self.state["error"] = error_msg
+                return None
         except Exception as e:
-            debug_log(f"Error fetching font: {str(e)}")
+            error_msg = f"Bootstrap: Error in _fetch_font_from_url_wrapper: {str(e)}"
+            debug_log(error_msg)
             debug_log(traceback.format_exc())
-            self.state["error"] = f"Error fetching font: {str(e)}. Try downloading the font and uploading it directly."
+            self.state["error"] = error_msg
             return None
 
     def on_url_change(self, event):
-        debug_log(f"URL changed: {event.target.value}")
+        debug_log(f"Bootstrap: URL changed: {event.target.value}")
         self.state["font_url"] = event.target.value
+        # Clear file input if URL is being typed
+        upload_element = document.getElementById("font-upload")
+        if upload_element:
+            upload_element.value = ""
+        self.state["file_data"] = None
+        file_name_display = document.getElementById("file-name-display")
+        if file_name_display:
+            file_name_display.textContent = "No file chosen"
+
 
     def on_process_file_click(self, event):
-        debug_log("Process file button clicked")
+        debug_log("Bootstrap: Process file button clicked")
+        self.state["error"] = ""
+        self.state["info"] = ""
+
+        upload_element = document.getElementById("font-upload")
+        # Check if a file is selected in the input. self.state["file_data"] should be set by on_file_change.
+        if not (upload_element and upload_element.files and upload_element.files.length > 0):
+            if not self.state.get("file_data"): # Check if we have cached data
+                self.state["error"] = "No file selected. Please choose a font file."
+                debug_log(f"Bootstrap: {self.state['error']}")
+                return
+            else: # Use cached data
+                debug_log("Bootstrap: Using previously stored file data for processing.")
+                self.state["is_processing"] = True
+                filename = "cached_file.dat" # Filename might not be available for cached data
+                self._process_font_py_logic(filename)
+                return
+
+        # A file is actively selected in the input element
         self.state["is_processing"] = True
         
-        # Get file directly from the input element
-        upload = document.getElementById("font-upload")
-        if upload and upload.files and upload.files.length > 0:
-            debug_log("Found file in input element")
-            
-            # Access file directly from the input element
-            async def process_file():
-                try:
-                    file = upload.files.item(0)
-                    debug_log(f"Processing file: {file.name}")
+        async def process_selected_file_async():
+            try:
+                file = upload_element.files.item(0)
+                filename = file.name
+                debug_log(f"Bootstrap: Reading selected file: {filename}")
+
+                array_buffer = await file.arrayBuffer()
+                font_bytes = array_buffer.to_bytes() # Convert JS ArrayBuffer to Python bytes
+                debug_log(f"Bootstrap: Read {len(font_bytes)} bytes from {filename}")
+
+                self.state["file_data"] = font_bytes # Store Python bytes
+                self._process_font_py_logic(filename) # This will handle analysis and state updates
                     
-                    # Read file data
-                    array_buffer = await file.arrayBuffer()
-                    data = array_buffer.to_bytes()
-                    debug_log(f"Read {len(data)} bytes")
-                    
-                    # Store data for processing
-                    self.state["file_data"] = data
-                    
-                    # Process immediately
-                    self.process_font()
-                    
-                except Exception as e:
-                    debug_log(f"Error accessing file: {str(e)}")
-                    debug_log(traceback.format_exc())
-                    self.state["error"] = f"Error accessing file: {str(e)}"
-                    self.state["is_processing"] = False
-            
-            # Run the async function
-            import asyncio
-            asyncio.ensure_future(process_file())
-            return
+            except Exception as e:
+                error_msg = f"Bootstrap: Error accessing or reading file: {str(e)}"
+                debug_log(error_msg)
+                debug_log(traceback.format_exc())
+                self.state["error"] = error_msg
+                self.state["is_processing"] = False # Ensure processing is stopped
         
-        # Fall back to using stored data
-        if not self.state["file_data"]:
-            self.state["error"] = "No file data. Please select a font file first."
-            self.state["is_processing"] = False
-            return
-            
-        self.process_font()
+        asyncio.ensure_future(process_selected_file_async())
     
     def on_process_url_click(self, event):
-        debug_log("Process URL button clicked")
+        debug_log("Bootstrap: Process URL button clicked")
+        self.state["error"] = ""
+        self.state["info"] = ""
+
+        font_url_value = self.state.get("font_url", "").strip()
+        if not font_url_value:
+            self.state["error"] = "Please enter a font URL."
+            debug_log(f"Bootstrap: {self.state['error']}")
+            return
+
+        # Clear file input if URL is being processed
+        upload_element = document.getElementById("font-upload")
+        if upload_element:
+            upload_element.value = ""
+        self.state["file_data"] = None
+        file_name_display = document.getElementById("file-name-display")
+        if file_name_display:
+            file_name_display.textContent = "No file chosen"
+
         self.state["is_processing"] = True
         
-        # Get URL from input
-        url_input = document.getElementById("font-url")
-        if url_input and url_input.value:
-            font_url = url_input.value.strip()
-            if font_url:
-                debug_log(f"Using font URL: {font_url}")
+        async def process_url_async():
+            try:
+                debug_log(f"Bootstrap: Attempting to fetch from URL: {font_url_value}")
+                font_bytes = await self._fetch_font_from_url_wrapper(font_url_value) # Use the new wrapper
                 
-                async def process_url():
-                    try:
-                        font_data = await self.fetch_font_from_url(font_url)
-                        if font_data:
-                            self.state["file_data"] = font_data
-                            self.process_font()
-                        else:
-                            self.state["is_processing"] = False
-                    except Exception as e:
-                        debug_log(f"Error in process_url: {str(e)}")
-                        self.state["error"] = f"Error processing URL: {str(e)}"
-                        self.state["is_processing"] = False
-                
-                # Run the async function
-                import asyncio
-                asyncio.ensure_future(process_url())
-                return
+                if font_bytes:
+                    self.state["file_data"] = font_bytes # Store Python bytes
+                    filename_from_url = font_url_value.split('/')[-1]
+                    self._process_font_py_logic(filename_from_url) # This handles analysis
+                else:
+                    # Error state should be set by _fetch_font_from_url_wrapper
+                    debug_log(f"Bootstrap: Fetching from URL {font_url_value} failed.")
+                    self.state["is_processing"] = False # Ensure processing is stopped
+
+            except Exception as e:
+                error_msg = f"Bootstrap: Error processing URL {font_url_value}: {str(e)}"
+                debug_log(error_msg)
+                debug_log(traceback.format_exc())
+                self.state["error"] = error_msg
+                self.state["is_processing"] = False # Ensure processing is stopped
         
-        # If we got here, no valid URL is available
-        debug_log("No URL provided")
-        self.state["error"] = "Please enter a valid font URL."
-        self.state["is_processing"] = False
+        asyncio.ensure_future(process_url_async())
         
     def on_reset_click(self, event):
-        debug_log("Reset clicked")
+        debug_log("Bootstrap: Reset clicked")
         self.state["info"] = ""
         self.state["error"] = ""
         self.state["file_data"] = None
         self.state["is_processing"] = False
+        self.state["font_url"] = "https://github.com/google/fonts/raw/refs/heads/main/ofl/abrilfatface/AbrilFatface-Regular.ttf" # Reset URL
         
-        # Reset file input
-        upload = document.getElementById("font-upload")
-        if upload:
-            upload.value = ""
-            
-        # Reset URL to default
-        url_input = document.getElementById("font-url")
-        if url_input:
-            url_input.value = "https://github.com/google/fonts/raw/refs/heads/main/ofl/abrilfatface/AbrilFatface-Regular.ttf"
-            self.state["font_url"] = url_input.value
+        upload_element = document.getElementById("font-upload")
+        if upload_element:
+            upload_element.value = "" # Clear the file input
+        file_name_display = document.getElementById("file-name-display")
+        if file_name_display:
+            file_name_display.textContent = "No file chosen"
+        url_input_element = document.getElementById("font-url")
+        if url_input_element: # Ensure URL input field is also reset to default
+            url_input_element.value = self.state["font_url"]
 
-    def process_font(self):
-        debug_log("Processing font data")
+
+    def _process_font_py_logic(self, filename="font_file.dat"):
+        # Renamed from process_font
+        debug_log(f"Bootstrap: _process_font_py_logic for: {filename}")
+        self.state["error"] = "" # Clear previous errors
+
+        if not self.state.get("file_data"):
+            self.state["error"] = "No font data available for processing."
+            debug_log(f"Bootstrap: {self.state['error']}")
+            self.state["is_processing"] = False
+            return
+
         try:
-            # Process font data
-            font_data = io.BytesIO(self.state["file_data"])
-            font = TTFont(font_data)
-            debug_log("Font loaded successfully")
+            font_bytes = self.state["file_data"]
+            analysis_result = analyze_font_data(font_bytes, filename) # Call shared function
             
-            # Extract name table
-            names = font["name"]
-            
-            # Helper to get name 
-            def get_name(nameID):
-                entry = names.getName(nameID, 3, 1, 0x409) or names.getName(nameID, 1, 0, 0)
-                return entry.toStr() if entry else "(N/A)"
-            
-            # Basic font info with labels
-            info_items = [
-                ("Family Name", get_name(1)),
-                ("Subfamily", get_name(2)),
-                ("Full Name", get_name(4)),
-                ("Units Per Em", str(font['head'].unitsPerEm)),
-                ("Tables", ", ".join(sorted(font.keys()))),
-                ("Number of Glyphs", str(len(font.getGlyphOrder())))
-            ]
-            
-            # Generate HTML for info items
-            info_html = ['<div class="font-info">']
-            for label, value in info_items:
-                info_html.append(f'''
-                    <div class="font-info-item">
-                        <div class="font-info-label">{label}</div>
-                        <div class="font-info-value">{value}</div>
-                    </div>
-                ''')
-            info_html.append('</div>')
-            
-            # Update state with formatted info
-            self.state["info"] = "\n".join(info_html)
-            self.state["error"] = ""
-            debug_log("Font info extracted and formatted")
-            
+            if "error" in analysis_result:
+                self.state["error"] = analysis_result["error"]
+                debug_log(f"Bootstrap: Analysis error: {self.state['error']}")
+                self.state["info"] = ""
+            else:
+                # Format the result for display using the Bootstrap HTML structure
+                info_items = []
+                name_details = analysis_result.get("name", {})
+                head_details = analysis_result.get("head", {})
+
+                info_items.append(("Family Name", name_details.get('font_family', 'N/A')))
+                info_items.append(("Subfamily", name_details.get('font_subfamily', 'N/A')))
+                info_items.append(("Full Name", name_details.get('full_name', 'N/A')))
+                info_items.append(("Version", name_details.get('version', 'N/A')))
+                info_items.append(("PostScript Name", name_details.get('postscript_name', 'N/A')))
+
+                info_items.append(("Units Per Em", str(head_details.get('unitsPerEm', 'N/A'))))
+
+                num_glyphs = "N/A"
+                if "glyf" in analysis_result and "num_glyphs" in analysis_result["glyf"]:
+                    num_glyphs = analysis_result["glyf"]["num_glyphs"]
+                elif "CFF " in analysis_result and analysis_result["CFF "].get("top_dict_data"):
+                    num_glyphs = analysis_result["CFF "]["top_dict_data"].get("num_glyphs", "N/A")
+                info_items.append(("Number of Glyphs", str(num_glyphs)))
+
+                info_items.append(("Tables", ", ".join(sorted(analysis_result.get('tables', [])))))
+
+                # Generate HTML for info items
+                # This matches the structure in the original process_font method for this file
+                info_html_parts = ['<div class="font-info">']
+                for label, value in info_items:
+                    info_html_parts.append(f'''
+                        <div class="font-info-item">
+                            <div class="font-info-label">{label}</div>
+                            <div class="font-info-value">{value}</div>
+                        </div>
+                    ''')
+                info_html_parts.append('</div>')
+
+                self.state["info"] = "\n".join(info_html_parts) # PuePy will render this HTML string
+                debug_log("Bootstrap: Font info extracted and formatted for display.")
+
         except Exception as e:
-            error_msg = f"Error processing font: {str(e)}"
+            error_msg = f"Bootstrap: Error in _process_font_py_logic: {str(e)}"
             debug_log(error_msg)
             debug_log(traceback.format_exc())
             self.state["error"] = error_msg
+            self.state["info"] = "" # Clear info on error
         finally:
-            self.state["is_processing"] = False
+            self.state["is_processing"] = False # Ensure processing is stopped
 
 app.mount("#app")
 debug_log("App mounted")
