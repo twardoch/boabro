@@ -1,0 +1,370 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>PyScript with Lit</title>
+  <script type="module" src="https://cdn.jsdelivr.net/npm/lit@2/+esm"></script>
+  <link rel="stylesheet" href="https://pyscript.net/releases/2025.3.1/core.css">
+  <script type="module" src="https://pyscript.net/releases/2025.3.1/core.js"></script>
+  <style>
+    :root {
+      --primary-color: #3498db;
+      --secondary-color: #2ecc71;
+      --background-color: #f8f9fa;
+      --text-color: #333;
+    }
+    body {
+      font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif;
+      margin: 0;
+      padding: 20px;
+      background-color: var(--background-color);
+      color: var(--text-color);
+    }
+  </style>
+</head>
+<body>
+  <font-analyzer></font-analyzer>
+
+  <py-config>
+    packages = ["fonttools"]
+    paths = ["../../src"]
+  </py-config>
+
+  <py-script>
+import io
+import js # For js.console, js.Uint8Array
+# TTFont and pyodide.http will be used by the imported utilities
+from boabro.boabro import fetch_font_bytes_from_url, analyze_font_data
+# from pyodide.ffi import to_js # Might not be needed if returning dicts that PyScript auto-converts for Lit
+
+# Removed local fetch_font_from_url and analyze_font as they are replaced by shared utilities.
+
+# Function to be called from JavaScript for uploaded files
+def process_font(font_data_js_array, filename="uploaded_font"):
+    """
+    Processes font data from a JS Uint8Array, analyzes it using shared utility,
+    and returns a dictionary suitable for the Lit component.
+    The Lit component expects a 'names' key for name table records.
+    """
+    js.console.log(f"[Python Lit] process_font called for {filename}")
+    try:
+        font_bytes = bytes(font_data_js_array.to_py())
+        
+        # Call shared utility
+        analysis_data = analyze_font_data(font_bytes, filename=filename)
+        
+        # Adapt the result for the Lit component
+        # The Lit component's HTML template uses result.names.map(...)
+        # The shared utility returns nameTableRecords.
+        # It also expects other fields like familyName, subfamily, fullName, upm, numGlyphs.
+        # The shared utility provides these directly.
+        
+        # Create the dictionary structure expected by Lit
+        lit_result = {
+            "fileName": analysis_data.get("fileName"),
+            "familyName": analysis_data.get("familyName"),
+            "subfamily": analysis_data.get("subfamily"),
+            "fullName": analysis_data.get("fullName"),
+            "version": analysis_data.get("version"), # Add if Lit component uses it
+            "upm": analysis_data.get("upm"),
+            "numGlyphs": analysis_data.get("numGlyphs"),
+            "tables": analysis_data.get("tables"), # Add if Lit component uses it
+            "names": analysis_data.get("nameTableRecords", []) # Map to 'names'
+        }
+        return lit_result # PyScript will convert this dict to a JS object for Lit
+    except Exception as e:
+        js.console.log(f"[Python Lit] Error in process_font for {filename}: {str(e)}")
+        return {"error": str(e)}
+
+# Function to be called from JavaScript for URLs
+async def process_font_url(url_str: str):
+    """
+    Fetches a font from a URL using shared utility, analyzes it,
+    and returns a dictionary suitable for the Lit component.
+    """
+    js.console.log(f"[Python Lit] process_font_url called with: {url_str}")
+    try:
+        font_bytes = await fetch_font_bytes_from_url(url_str) # from boabro.boabro
+        if font_bytes:
+            filename = url_str.split('/')[-1] if url_str else "font_from_url"
+            analysis_data = analyze_font_data(font_bytes, filename=filename)
+
+            lit_result = {
+                "fileName": analysis_data.get("fileName"),
+                "familyName": analysis_data.get("familyName"),
+                "subfamily": analysis_data.get("subfamily"),
+                "fullName": analysis_data.get("fullName"),
+                "version": analysis_data.get("version"),
+                "upm": analysis_data.get("upm"),
+                "numGlyphs": analysis_data.get("numGlyphs"),
+                "tables": analysis_data.get("tables"),
+                "names": analysis_data.get("nameTableRecords", [])
+            }
+            return lit_result
+        else:
+            return {"error": f"Failed to fetch font from URL: {url_str} (shared utility returned None)"}
+    except Exception as e:
+        js.console.log(f"[Python Lit] Error in process_font_url for {url_str}: {str(e)}")
+        return {"error": f"Error processing font URL: {str(e)}"}
+  </py-script>
+
+  <script type="module">
+    import { LitElement, html, css } from 'https://cdn.jsdelivr.net/npm/lit@2/+esm';
+    
+    class FontAnalyzer extends LitElement {
+      static styles = css`
+        :host {
+          display: block;
+          max-width: 800px;
+          margin: 0 auto;
+        }
+        .card {
+          background-color: white;
+          border-radius: 8px;
+          box-shadow: 0 4px 6px rgba(0, 0, 0, 0.1);
+          padding: 20px;
+          margin-bottom: 20px;
+        }
+        .button {
+          background-color: var(--primary-color);
+          color: white;
+          border: none;
+          border-radius: 4px;
+          padding: 8px 16px;
+          cursor: pointer;
+          font-weight: bold;
+        }
+        .button:disabled {
+          opacity: 0.6;
+          cursor: not-allowed;
+        }
+        .file-input {
+          margin-bottom: 16px;
+        }
+        .result-table {
+          width: 100%;
+          border-collapse: collapse;
+        }
+        .result-table th, .result-table td {
+          border: 1px solid #ddd;
+          padding: 8px;
+          text-align: left;
+        }
+        .result-table th {
+          background-color: #f2f2f2;
+        }
+        .error {
+          color: red;
+          font-weight: bold;
+        }
+      `;
+      
+      static properties = {
+        hasFile: { type: Boolean },
+        processing: { type: Boolean },
+        result: { type: Object },
+        error: { type: String },
+        fileName: { type: String },
+        fontUrl: { type: String }
+      };
+      
+      constructor() {
+        super();
+        this.hasFile = false;
+        this.processing = false;
+        this.result = null;
+        this.error = '';
+        this.fileName = '';
+        this.fontUrl = 'https://github.com/google/fonts/raw/refs/heads/main/ofl/abrilfatface/AbrilFatface-Regular.ttf';
+        this.isPyScriptReady = false;
+        this._checkPyScriptReady();
+      }
+
+      async _checkPyScriptReady() {
+        console.log('[LitComponent] Checking PyScript readiness...');
+        if (window.pyscript && window.pyscript.interpreter) {
+          console.log('[LitComponent] PyScript interpreter found on initial check.');
+          this.isPyScriptReady = true;
+          this.requestUpdate(); // Ensure component re-renders if state changes
+          return;
+        }
+        document.addEventListener('py:ready', () => {
+          console.log('[LitComponent] py:ready event fired.');
+          this.isPyScriptReady = true;
+          this.requestUpdate();
+        }, { once: true });
+      }
+      
+      render() {
+        return html`
+          <div class="card">
+            <h2>Font Analyzer</h2>
+            <p>Upload a TTF or OTF font file to analyze its properties, or provide a URL.</p>
+            
+            <div style="margin-bottom: 16px;">
+              <label style="display: block; margin-bottom: 8px; font-weight: bold;">Font File:</label>
+              <input type="file" 
+                    class="file-input" 
+                    accept=".ttf,.otf" 
+                    @change=${this.handleFileChange} 
+                    ?disabled=${this.processing}>
+              
+              ${this.fileName ? html`
+                <div style="margin-top: 8px; font-size: 0.9em; color: #666;">
+                  Selected file: ${this.fileName}
+                </div>
+              ` : ''}
+            </div>
+            
+            <div style="margin-bottom: 16px;">
+              <label style="display: block; margin-bottom: 8px; font-weight: bold;">Font URL:</label>
+              <input type="url"
+                     style="width: 100%; padding: 8px; margin-bottom: 8px; box-sizing: border-box; border: 1px solid #ccc; border-radius: 4px;"
+                     placeholder="https://example.com/font.ttf"
+                     .value=${this.fontUrl}
+                     @input=${this.handleUrlChange}
+                     ?disabled=${this.processing}>
+              <div style="font-size: 0.9em; color: #666;">
+                If both file and URL are provided, the file will be used.
+              </div>
+            </div>
+            
+            <button class="button" 
+                   @click=${this.analyzeFontFile} 
+                   ?disabled=${!this.isPyScriptReady || (!this.hasFile && !this.fontUrl) || this.processing}>
+              ${this.processing ? 'Processing...' : (this.isPyScriptReady ? 'Analyze Font' : 'PyScript Loading...')}
+            </button>
+          </div>
+          
+          ${this.error ? html`
+            <div class="card">
+              <p class="error" role="alert">${this.error}</p>
+            </div>
+          ` : ''}
+          
+          ${this.result && !this.error ? html`
+            <div class="card">
+              <h3>Font Information: ${this.result.fileName || this.fileName || new URL(this.fontUrl).pathname.split('/').pop()}</h3>
+              <p><strong>Family Name:</strong> ${this.result.familyName}</p>
+              <p><strong>Subfamily:</strong> ${this.result.subfamily}</p>
+              <p><strong>Full Name:</strong> ${this.result.fullName}</p>
+              <p><strong>Units Per Em (UPM):</strong> ${this.result.upm}</p>
+              <p><strong>Number of Glyphs:</strong> ${this.result.numGlyphs}</p>
+              
+              <h3>Name Table Entries</h3>
+              <table class="result-table">
+                <thead>
+                  <tr>
+                    <th>Name ID</th>
+                    <th>Platform ID</th>
+                    <th>String</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  ${this.result.names && this.result.names.map(entry => html`
+                    <tr>
+                      <td>${entry['Name ID']}</td>
+                      <td>${entry['Platform ID']}</td>
+                      <td>${entry['String']}</td>
+                    </tr>
+                  `)}
+                </tbody>
+              </table>
+            </div>
+          ` : ''}
+        `;
+      }
+      
+      handleFileChange(event) {
+        console.log('[LitComponent] handleFileChange triggered');
+        this.hasFile = event.target.files.length > 0;
+        if (this.hasFile) {
+          this.fileData = event.target.files[0];
+          this.fileName = this.fileData.name;
+          console.log('[LitComponent] File selected:', this.fileName);
+        } else {
+          this.fileData = null;
+          this.fileName = '';
+          console.log('[LitComponent] File deselected.');
+        }
+        this.result = null;
+        this.error = '';
+      }
+      
+      handleUrlChange(event) {
+        console.log('[LitComponent] handleUrlChange triggered');
+        this.fontUrl = event.target.value;
+        this.result = null;
+        this.error = '';
+      }
+      
+      async analyzeFontFile() {
+        console.log('[LitComponent] analyzeFontFile called.');
+        if (!this.isPyScriptReady) {
+          this.error = "PyScript is not ready. Please wait.";
+          console.error('[LitComponent] PyScript not ready for analysis.');
+          return;
+        }
+
+        if (!this.hasFile && !this.fontUrl) {
+          this.error = 'Please provide either a file or URL.';
+          console.warn('[LitComponent] No file or URL provided for analysis.');
+          return;
+        }
+        
+        this.processing = true;
+        this.error = '';
+        this.result = null;
+        console.log('[LitComponent] Processing started.');
+        
+        try {
+          const process_font_py = pyscript.interpreter.globals.get('process_font');
+          const process_font_url_py = pyscript.interpreter.globals.get('process_font_url');
+          let analysisResultPyProxy;
+
+          if (this.hasFile && this.fileData) {
+            console.log('[LitComponent] Analyzing file:', this.fileName);
+            const arrayBuffer = await this.fileData.arrayBuffer();
+            const fontDataJsArr = new Uint8Array(arrayBuffer);
+            analysisResultPyProxy = await process_font_py(fontDataJsArr);
+          } 
+          else if (this.fontUrl) {
+            console.log('[LitComponent] Analyzing URL:', this.fontUrl);
+            analysisResultPyProxy = await process_font_url_py(this.fontUrl);
+          } else {
+             throw new Error("No data source available for analysis."); // Should not happen due to earlier check
+          }
+
+          const analysisResult = analysisResultPyProxy.toJs({ dict_converter: Object.fromEntries });
+          analysisResultPyProxy.destroy(); // Clean up PyProxy
+
+          console.log('[LitComponent] Python analysis result:', analysisResult);
+            
+          if (analysisResult.error) {
+            this.error = `Error analyzing font: ${analysisResult.error}`;
+            console.error('[LitComponent] Python returned an error:', this.error);
+          } else {
+            // Add filename to result if not already present (e.g. from URL analysis)
+            if (!analysisResult.fileName && this.fileName) analysisResult.fileName = this.fileName;
+            this.result = analysisResult;
+            console.log('[LitComponent] Analysis successful, result set.');
+          }
+
+        } catch (e) {
+          this.error = `JavaScript Error: ${e.message}`;
+          console.error('[LitComponent] JavaScript error during analysis:', e);
+        } finally {
+          this.processing = false;
+          console.log('[LitComponent] Processing finished.');
+          this.requestUpdate(); // Ensure Lit re-renders with new state
+        }
+      }
+      // Removed waitForPyScript as readiness is now handled by isPyScriptReady property
+    }
+    
+    customElements.define('font-analyzer', FontAnalyzer);
+    console.log('[LitMain] FontAnalyzer component defined.');
+  </script>
+</body>
+</html>

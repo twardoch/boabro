@@ -4,19 +4,44 @@
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
   <title>Font Inspector - Solid.js + PyScript</title>
-  <script src="https://cdn.jsdelivr.net/npm/solid-js@1.7.11/dist/solid.js"></script>
-  <!-- Local JSX transformer -->
+  <!-- Load Babel first for JSX transformation -->
   <script src="https://unpkg.com/@babel/standalone/babel.min.js"></script>
   <script>
-    Babel.registerPreset('solid', {
-      presets: [],
-      plugins: [
-        [Babel.availablePlugins['jsx'], { runtime: 'automatic' }]
-      ]
-    });
+    // Ensure Babel is loaded before trying to use it
+    // This script block will execute after babel.min.js has been parsed.
+    try {
+      if (Babel) {
+        Babel.registerPreset('solid', {
+          // Attempting a more Solid-specific preset configuration based on common needs.
+          // This might still not be perfect without the actual babel-preset-solid.
+          plugins: [
+            ["@babel/plugin-syntax-jsx"], // Basic JSX syntax
+            // Solid's JSX requires a custom transform.
+            // For standalone, this often means using a plugin that provides `solid-js/h` or similar.
+            // The generic 'jsx' plugin with 'automatic' runtime might not be sufficient.
+            // Let's keep it simple first, then try to adjust if this doesn't work.
+            // The original used: [Babel.availablePlugins['jsx'], { runtime: 'automatic' }]
+            // which might be okay if Solid's UMD can work with an automatic JSX runtime.
+             [Babel.availablePlugins['jsx'], {
+                "pragma": "(()=>{const{createElement:h,Fragment:f}=window.solid;return(t,a,...e)=>h(t,a,...e)})()",
+                "pragmaFrag": "(()=>{const{Fragment:f}=window.solid;return f})()"
+             }]
+          ]
+        });
+        console.log("Babel 'solid' preset registered.");
+      } else {
+        console.error("Babel not loaded when trying to register preset.");
+      }
+    } catch (e) {
+      console.error("Error registering Babel preset for Solid:", e);
+    }
   </script>
+  <!-- Then Solid.js -->
+  <script src="https://cdn.jsdelivr.net/npm/solid-js@1.7.11/dist/solid.js"></script>
+  <!-- Then PyScript -->
   <link rel="stylesheet" href="https://pyscript.net/releases/2025.3.1/core.css">
   <script type="module" src="https://pyscript.net/releases/2025.3.1/core.js"></script>
+  <!-- Tailwind CSS -->
   <link href="https://cdn.jsdelivr.net/npm/tailwindcss@2.2.19/dist/tailwind.min.css" rel="stylesheet">
 </head>
 <body class="bg-gray-100 min-h-screen">

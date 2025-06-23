@@ -462,20 +462,31 @@ def process_font(font_data_js, filename=None):
     
     // Initialize the application
     document.addEventListener('py:ready', async () => {
+      console.log("[JS] py:ready event fired. Initializing application.");
       try {
+        if (!window.pyscript || !window.pyscript.interpreter) {
+          console.error("[JS] PyScript object or interpreter not found after py:ready!");
+          alert("Critical Error: PyScript interpreter not available. Please reload.");
+          throw new Error("PyScript interpreter is not available even after py:ready.");
+        }
+        console.log("[JS] PyScript interpreter seems available.");
+
         // Open the database
         await openDB();
+        console.log("[JS] Database opened.");
         
         // Update the saved fonts list
         await updateSavedFontsList();
+        console.log("[JS] Saved fonts list updated.");
         
         const fileInput = document.getElementById('font-file');
         const analyzeButton = document.getElementById('analyze-btn');
         const clearAllButton = document.getElementById('clear-all-btn');
         const resultContainer = document.getElementById('result-container');
         
-        // Get the Python interpreter
-        const pyodide = await pyscript.interpreter;
+        // Get the Python interpreter object (it's not a promise after py:ready)
+        const interpreter = pyscript.interpreter;
+        console.log("[JS] Got interpreter object:", interpreter);
         
         // Analyze button click handler
         analyzeButton.addEventListener('click', async () => {
