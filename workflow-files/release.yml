@@ -1,0 +1,237 @@
+name: Release
+
+on:
+  push:
+    tags: ["v*"]
+
+permissions:
+  contents: write
+  id-token: write
+
+jobs:
+  test:
+    runs-on: ubuntu-latest
+    strategy:
+      matrix:
+        python-version: ["3.10", "3.11", "3.12"]
+
+    steps:
+    - uses: actions/checkout@v4
+      with:
+        fetch-depth: 0
+
+    - name: Set up Python ${{ matrix.python-version }}
+      uses: actions/setup-python@v5
+      with:
+        python-version: ${{ matrix.python-version }}
+
+    - name: Install UV
+      uses: astral-sh/setup-uv@v5
+      with:
+        version: "latest"
+        python-version: ${{ matrix.python-version }}
+        enable-cache: true
+
+    - name: Install dependencies
+      run: |
+        uv pip install -e .[dev,test]
+        uv pip install build
+
+    - name: Run tests
+      run: |
+        python scripts/test.py
+
+    - name: Build package
+      run: |
+        python scripts/build.py
+
+    - name: Upload build artifacts
+      uses: actions/upload-artifact@v4
+      with:
+        name: dist-${{ matrix.python-version }}
+        path: dist/
+
+  build-binaries:
+    runs-on: ${{ matrix.os }}
+    needs: test
+    strategy:
+      matrix:
+        include:
+          - os: ubuntu-latest
+            target: linux-x86_64
+          - os: windows-latest
+            target: windows-x86_64
+          - os: macos-latest
+            target: macos-x86_64
+          - os: macos-latest
+            target: macos-arm64
+    
+    steps:
+    - uses: actions/checkout@v4
+      with:
+        fetch-depth: 0
+
+    - name: Set up Python
+      uses: actions/setup-python@v5
+      with:
+        python-version: "3.12"
+
+    - name: Install UV
+      uses: astral-sh/setup-uv@v5
+      with:
+        version: "latest"
+        python-version: "3.12"
+        enable-cache: true
+
+    - name: Install dependencies
+      run: |
+        uv pip install -e .[dev,test]
+        uv pip install pyinstaller
+
+    - name: Create CLI script
+      run: |
+        mkdir -p cli
+        cat > cli/boabro_cli.py << 'EOF'
+        #!/usr/bin/env python3
+        """CLI interface for boabro."""
+        import sys
+        from pathlib import Path
+        import argparse
+        from boabro import analyze_font_data, __version__
+        
+        def main():
+            parser = argparse.ArgumentParser(description="Boabro font analysis tool")
+            parser.add_argument("--version", action="version", version=f"boabro {__version__}")
+            parser.add_argument("font_file", help="Font file to analyze")
+            parser.add_argument("--output", "-o", help="Output file (default: stdout)")
+            parser.add_argument("--format", choices=["json", "text"], default="text", help="Output format")
+            
+            args = parser.parse_args()
+            
+            font_path = Path(args.font_file)
+            if not font_path.exists():
+                print(f"Error: Font file {font_path} does not exist", file=sys.stderr)
+                sys.exit(1)
+            
+            try:
+                with open(font_path, "rb") as f:
+                    font_bytes = f.read()
+                
+                result = analyze_font_data(font_bytes, font_path.name)
+                
+                if args.format == "json":
+                    import json
+                    output = json.dumps(result, indent=2)
+                else:
+                    output = f"Font Analysis: {result['fileName']}\n"
+                    output += f"Family: {result['familyName']}\n"
+                    output += f"Style: {result['subfamily']}\n"
+                    output += f"Version: {result['version']}\n"
+                    output += f"UPM: {result['upm']}\n"
+                    output += f"Glyphs: {result['numGlyphs']}\n"
+                    output += f"Tables: {', '.join(result['tables'])}\n"
+                
+                if args.output:
+                    with open(args.output, "w") as f:
+                        f.write(output)
+                else:
+                    print(output)
+                    
+            except Exception as e:
+                print(f"Error analyzing font: {e}", file=sys.stderr)
+                sys.exit(1)
+        
+        if __name__ == "__main__":
+            main()
+        EOF
+
+    - name: Build binary with PyInstaller
+      run: |
+        pyinstaller --onefile --name boabro-${{ matrix.target }} cli/boabro_cli.py
+
+    - name: Upload binary artifact
+      uses: actions/upload-artifact@v4
+      with:
+        name: boabro-${{ matrix.target }}
+        path: dist/boabro-${{ matrix.target }}*
+
+  release:
+    name: Release to PyPI
+    runs-on: ubuntu-latest
+    needs: [test, build-binaries]
+    environment:
+      name: pypi
+      url: https://pypi.org/p/boabro
+
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+
+      - name: Install UV
+        uses: astral-sh/setup-uv@v5
+        with:
+          version: "latest"
+          python-version: "3.12"
+          enable-cache: true
+
+      - name: Install build tools
+        run: uv pip install build hatchling hatch-vcs
+
+      - name: Build distributions
+        run: uv run python -m build --outdir dist
+
+      - name: Verify distribution files
+        run: |
+          ls -la dist/
+          test -n "$(find dist -name '*.whl')" || (echo "Wheel file missing" && exit 1)
+          test -n "$(find dist -name '*.tar.gz')" || (echo "Source distribution missing" && exit 1)
+
+      - name: Download all artifacts
+        uses: actions/download-artifact@v4
+        with:
+          path: artifacts/
+
+      - name: Publish to PyPI
+        uses: pypa/gh-action-pypi-publish@release/v1
+        with:
+          password: ${{ secrets.PYPI_TOKEN }}
+
+      - name: Create GitHub Release
+        uses: softprops/action-gh-release@v1
+        with:
+          files: |
+            dist/*
+            artifacts/boabro-*/*
+          generate_release_notes: true
+          body: |
+            ## Installation
+            
+            ### Python Package
+            ```bash
+            pip install boabro
+            ```
+            
+            ### Binary Downloads
+            Download the appropriate binary for your platform:
+            - Linux: `boabro-linux-x86_64`
+            - Windows: `boabro-windows-x86_64.exe`
+            - macOS (Intel): `boabro-macos-x86_64`
+            - macOS (Apple Silicon): `boabro-macos-arm64`
+            
+            ### Usage
+            ```bash
+            boabro font.ttf
+            boabro font.ttf --format json --output analysis.json
+            ```
+            
+            ## Web Interface
+            Visit [https://twardoch.github.io/boabro/docs/](https://twardoch.github.io/boabro/docs/) to use the browser-based interface.
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }} 
