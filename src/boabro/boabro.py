@@ -5,8 +5,7 @@ Created by Adam Twardoch
 """
 
 from dataclasses import dataclass
-from pathlib import Path
-from typing import Any, Dict, List, Optional, Union
+from typing import Any
 import logging
 
 __version__ = "0.1.0"
@@ -23,8 +22,8 @@ logger = logging.getLogger(__name__)
 class Config:
     """Configuration settings for boabro."""
     name: str
-    value: Union[str, int, float]
-    options: Optional[Dict[str, Any]] = None
+    value: str | int | float
+    options: dict[str, Any] | None = None
 
 # --- Font Analysis Utilities ---
 import io
@@ -65,7 +64,7 @@ def _log_util_debug(message: str):
         print(f"[BoabroUtilDebug] {message}")
 
 
-async def fetch_font_bytes_from_url(url_str: str) -> Optional[bytes]:
+async def fetch_font_bytes_from_url(url_str: str) -> bytes | None:
     """Fetches font data from a given URL.
 
     This function attempts to retrieve font file bytes using several strategies:
@@ -86,15 +85,15 @@ async def fetch_font_bytes_from_url(url_str: str) -> Optional[bytes]:
                          otherwise None.
     """
     _log_util_debug(f"Fetching font from URL: {url_str}")
-    if not url_str or not url_str.startswith(('http://', 'https://')):
+    if not url_str or not url_str.startswith(("http://", "https://")):
         util_logger.error(f"Invalid URL provided: {url_str}")
         return None
 
     try:
         # Determine headers. In PyScript, document.location might be available.
         # Default to generic referer/origin if not in a browser context with 'document'.
-        referer = document.location.href if document and hasattr(document, 'location') else "https://example.com/"
-        origin = document.location.origin if document and hasattr(document, 'location') else "https://example.com/"
+        referer = document.location.href if document and hasattr(document, "location") else "https://example.com/"
+        origin = document.location.origin if document and hasattr(document, "location") else "https://example.com/"
 
         headers_dict = {
             "User-Agent": "Mozilla/5.0 (BoabroFontInspector/1.0)",
@@ -103,7 +102,7 @@ async def fetch_font_bytes_from_url(url_str: str) -> Optional[bytes]:
             "Origin": origin
         }
         # In PyScript, headers must be a JS Object.
-        headers_js = Object.fromEntries(to_js(headers_dict).entries()) if 'to_js' in globals() and 'Object' in globals() else headers_dict
+        headers_js = Object.fromEntries(to_js(headers_dict).entries()) if "to_js" in globals() and "Object" in globals() else headers_dict
 
 
         cors_proxies = [
@@ -125,7 +124,7 @@ async def fetch_font_bytes_from_url(url_str: str) -> Optional[bytes]:
                     font_data_bytes = await response.bytes()
                     _log_util_debug(f"Successfully fetched {len(font_data_bytes)} bytes from raw GitHub URL.")
             except Exception as e:
-                _log_util_debug(f"Raw GitHub URL request failed: {str(e)}")
+                _log_util_debug(f"Raw GitHub URL request failed: {e!s}")
 
         # Try CORS proxies if raw GitHub failed or not a GitHub URL
         if not font_data_bytes:
@@ -139,7 +138,7 @@ async def fetch_font_bytes_from_url(url_str: str) -> Optional[bytes]:
                         _log_util_debug(f"Successfully fetched {len(font_data_bytes)} bytes via proxy: {proxy_base}")
                         break
                 except Exception as e:
-                    _log_util_debug(f"Proxy {proxy_base} request failed: {str(e)}")
+                    _log_util_debug(f"Proxy {proxy_base} request failed: {e!s}")
 
         # Try direct URL if proxies failed
         if not font_data_bytes:
@@ -150,7 +149,7 @@ async def fetch_font_bytes_from_url(url_str: str) -> Optional[bytes]:
                     font_data_bytes = await response.bytes()
                     _log_util_debug(f"Successfully fetched {len(font_data_bytes)} bytes from direct URL.")
             except Exception as e:
-                 _log_util_debug(f"Direct URL request failed: {str(e)}")
+                 _log_util_debug(f"Direct URL request failed: {e!s}")
 
         # Try no-cors as a last resort
         if not font_data_bytes:
@@ -158,7 +157,7 @@ async def fetch_font_bytes_from_url(url_str: str) -> Optional[bytes]:
             try:
                 # For no-cors, headers might be restricted. Sending minimal.
                 no_cors_headers_dict = {"Accept": "*/*"}
-                no_cors_headers_js = Object.fromEntries(to_js(no_cors_headers_dict).entries()) if 'to_js' in globals() and 'Object' in globals() else no_cors_headers_dict
+                no_cors_headers_js = Object.fromEntries(to_js(no_cors_headers_dict).entries()) if "to_js" in globals() and "Object" in globals() else no_cors_headers_dict
                 response = await pyodide.http.pyfetch(url_str, headers=no_cors_headers_js, mode="no-cors")
                 font_data_bytes = await response.bytes()
                 if font_data_bytes and len(font_data_bytes) > 0:
@@ -167,7 +166,7 @@ async def fetch_font_bytes_from_url(url_str: str) -> Optional[bytes]:
                     _log_util_debug(f"No-cors mode did not yield data for {url_str}.")
                     font_data_bytes = None
             except Exception as e:
-                _log_util_debug(f"No-cors request failed for {url_str}: {str(e)}")
+                _log_util_debug(f"No-cors request failed for {url_str}: {e!s}")
                 font_data_bytes = None
 
         if not font_data_bytes:
@@ -177,10 +176,10 @@ async def fetch_font_bytes_from_url(url_str: str) -> Optional[bytes]:
         return font_data_bytes
 
     except Exception as e:
-        util_logger.error(f"Generic error in fetch_font_bytes_from_url for {url_str}: {str(e)}\n{traceback.format_exc()}")
+        util_logger.error(f"Generic error in fetch_font_bytes_from_url for {url_str}: {e!s}\n{traceback.format_exc()}")
         return None
 
-def analyze_font_data(font_bytes: bytes, filename: Optional[str] = "font") -> Dict[str, Any]:
+def analyze_font_data(font_bytes: bytes, filename: str | None = "font") -> dict[str, Any]:
     """Analyzes font data using fontTools and returns a structured dictionary.
 
     Args:
@@ -297,16 +296,16 @@ def analyze_font_data(font_bytes: bytes, filename: Optional[str] = "font") -> Di
         _log_util_debug(f"Analysis successful for {filename}.")
         return result
     except Exception as e:
-        util_logger.error(f"Error analyzing font {filename}: {str(e)}\n{traceback.format_exc()}")
+        util_logger.error(f"Error analyzing font {filename}: {e!s}\n{traceback.format_exc()}")
         raise # Re-raise to allow calling function to handle it, or return an error dict.
 
 
 def process_data(
-    data: List[Any],
-    config: Optional[Config] = None,
+    data: list[Any],
+    config: Config | None = None,
     *,
     debug: bool = False
-) -> Dict[str, Any]:
+) -> dict[str, Any]:
     """Process the input data according to configuration.
     
     Args:
@@ -323,12 +322,12 @@ def process_data(
     if debug:
         logger.setLevel(logging.DEBUG)
         logger.debug("Debug mode enabled")
-        
+
     if not data:
         raise ValueError("Input data cannot be empty")
-        
+
     # TODO: Implement data processing logic
-    result: Dict[str, Any] = {}
+    result: dict[str, Any] = {}
     return result
 
 
@@ -343,11 +342,11 @@ def main() -> None:
         )
         result = process_data([], config=config)
         logger.info("Processing completed: %s", result)
-        
+
     except Exception as e:
         logger.error("An error occurred: %s", str(e))
         raise
 
 
 if __name__ == "__main__":
-    main() 
+    main()
