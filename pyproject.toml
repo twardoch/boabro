@@ -2,11 +2,11 @@
 [project]
 name = "boabro"
 dynamic = ["version"]
-description = ""
+description = "Browser-based font analysis tools"
 readme = "README.md"
 requires-python = ">=3.10"
 license = "MIT"
-keywords = []
+keywords = ["font", "typography", "analysis", "browser", "pyscript"]
 classifiers = [
     "Development Status :: 4 - Beta",
     "Programming Language :: Python",
@@ -15,9 +15,13 @@ classifiers = [
     "Programming Language :: Python :: 3.12",
     "Programming Language :: Python :: Implementation :: CPython",
     "Programming Language :: Python :: Implementation :: PyPy",
+    "Topic :: Text Processing :: Fonts",
+    "Topic :: Multimedia :: Graphics",
+    "Environment :: Web Environment",
 ]
 
 dependencies = [
+    "fontTools>=4.40.0",
 ]
 
 
@@ -40,7 +44,7 @@ all = [
 ]
 
 [project.scripts]
-# CLINAME = "boabro.__main__:main"
+boabro = "boabro.__main__:main"
 
 
 

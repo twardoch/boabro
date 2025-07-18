@@ -1,7 +1,6 @@
 import unittest
 import os
 from pathlib import Path
-from typing import Dict, Any
 
 # Add the src directory to sys.path to allow importing boabro
 import sys
