@@ -1,46 +1,46 @@
 # GitHub Actions Workflows
 
-These workflow files need to be manually added to the repository due to GitHub App permissions.
+These workflow files must be added manually to the repository due to GitHub App permission limitations.
 
-## Files to Add
+## Required Files
 
-1. **`ci.yml`** - Continuous Integration workflow
-   - Runs on push/PR to main/develop branches
-   - Tests across Python 3.10, 3.11, 3.12
-   - Runs linting, type checking, and tests
-   - Includes integration testing for HTML examples
+1. **`ci.yml`** - Continuous Integration
+   - Runs on push/PR to main and develop branches
+   - Tests Python 3.10, 3.11, 3.12
+   - Executes linting, type checking, and unit tests
+   - Includes HTML example integration testing
 
-2. **`release.yml`** - Release workflow  
-   - Triggers on git tags (v*)
-   - Runs full test suite across Python versions
+2. **`release.yml`** - Release Management
+   - Triggers on git tags matching pattern `v*`
+   - Runs complete test suite across all Python versions
    - Builds multiplatform binaries (Linux, Windows, macOS)
-   - Creates GitHub releases with binaries
-   - Publishes to PyPI
+   - Creates GitHub releases with attached binaries
+   - Publishes packages to PyPI
 
-## How to Add
+## Setup Instructions
 
-1. Copy these files to `.github/workflows/` in your repository
-2. Commit and push the changes
-3. The workflows will automatically activate
+1. Copy workflow files to `.github/workflows/`
+2. Commit and push changes
+3. Workflows activate automatically
 
 ## Required Secrets
 
-For the release workflow to work, you'll need to add these secrets in your GitHub repository settings:
+Add this secret in GitHub repository settings for release workflow:
 
-- `PYPI_TOKEN` - PyPI API token for publishing packages
+- `PYPI_TOKEN` - PyPI API token for package publishing
 
-## Testing
+## Workflow Triggers
 
-- CI workflow will run automatically on every push/PR
-- Release workflow will run when you push a git tag like `v1.0.1`
+- CI runs on every push or pull request
+- Release runs when pushing git tags like `v1.0.1`
 
-## Usage
+## Release Commands
 
 ```bash
-# Create a new release
+# Manual tagging
 git tag -a v1.0.1 -m "Release v1.0.1"
 git push --tags
 
-# Or use the release script
+# Automated tagging via script
 python scripts/release.py patch  # or minor/major
 ```

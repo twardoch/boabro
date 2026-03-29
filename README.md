@@ -1,37 +1,34 @@
 # Boabro - Browser-based Font Analysis Tools
 
-Boabro is a versatile toolkit that empowers you to analyze font files (such as TTF, OTF, WOFF, and WOFF2) directly within your web browser. It leverages the power of Python and the robust `fontTools` library, all running seamlessly on the client-side thanks to [PyScript](https://pyscript.net/).
+Boabro analyzes font files (TTF, OTF, WOFF, WOFF2) directly in your web browser. It uses Python and the `fontTools` library, running client-side via [PyScript](https://pyscript.net/).
 
 ## What does Boabro do?
 
-At its core, Boabro allows you to:
-
-*   **Inspect Font Details**: Upload a font file or provide a URL, and Boabro will dissect it to reveal comprehensive information.
-*   **View Metadata**: Access essential details like family name, style, version, manufacturer, designer, and license information.
-*   **Explore Font Tables**: Examine the underlying OpenType tables (the data structures that define a font's appearance and behavior) that define the font's structure and features.
-*   **Check Key Metrics**: Get insights into units per em (UPM), glyph counts, and more.
-*   **Run Anywhere**: Because it runs in the browser, you can use it on almost any device with a modern web browser, without needing to install specialized font software.
+Boabro lets you:
+*   **Inspect Font Details**: Upload a font file or provide a URL for analysis
+*   **View Metadata**: See family name, style, version, manufacturer, designer, and license info
+*   **Explore Font Tables**: Examine OpenType tables that define font structure and features
+*   **Check Key Metrics**: View units per em (UPM), glyph counts, and other technical details
+*   **Run Anywhere**: Works on any device with a modern browser—no specialized software needed
 
 ## Who is Boabro for?
 
-Boabro is designed for a wide range of users, including:
-
-*   **Web Developers & Designers**: Quickly check font details, troubleshoot web font issues, or verify font characteristics without leaving the browser.
-*   **Typographers & Font Engineers**: Perform quick analyses and inspections of font files during the design or testing process.
-*   **Students & Educators**: Learn about font structures and OpenType features in an accessible, interactive way.
-*   **Anyone Curious About Fonts**: If you've ever wanted to peek inside a font file, Boabro makes it easy.
+*   **Web Developers & Designers**: Quick font checks, web font troubleshooting, characteristic verification
+*   **Typographers & Font Engineers**: Rapid analysis during design or testing
+*   **Students & Educators**: Interactive learning about font structures and OpenType features
+*   **Font Curious**: Anyone wanting to peek inside font files
 
 ## Why is Boabro useful?
 
-*   **Zero Installation**: No need to download or install dedicated font software. It runs directly in your browser.
-*   **Client-Side Processing**: All analysis happens on your computer (meaning analysis happens in your browser, not on a remote server for local files), ensuring privacy and speed.
-*   **Python Powered**: Demonstrates how powerful Python libraries like `fontTools` can be used for complex tasks directly in a web environment.
-*   **UI Flexibility**: Showcases integration with a diverse set of modern web UI technologies and approaches, making it a great learning resource for developers interested in PyScript.
-*   **Cross-Platform**: Works on any operating system with a compatible web browser.
+*   **Zero Installation**: Runs in-browser, no downloads required
+*   **Client-Side Processing**: Local files stay local, remote files fetch securely
+*   **Python Powered**: Proves Python libraries can work in web environments
+*   **UI Flexibility**: Demonstrates various web UI integrations with PyScript
+*   **Cross-Platform**: Any OS with a compatible browser
 
-## Getting Started & Installation
+## Getting Started
 
-Boabro is primarily a collection of demonstration tools rather than a traditional installable library. To explore its capabilities:
+Boabro is a collection of demonstration tools, not a traditional library. To explore:
 
 1.  **Clone the Repository**:
     ```bash
@@ -40,158 +37,116 @@ Boabro is primarily a collection of demonstration tools rather than a traditiona
     ```
 
 2.  **Start a Local Web Server**:
-    Since the tools run in your browser, you need a local HTTP server to serve the files. Python's built-in server is a simple option:
     ```bash
     python -m http.server 8080
-    # Or use any other simple HTTP server like 'npx serve'
     ```
 
 3.  **Access the Tools**:
-    Open your web browser and navigate to the `docs` directory, typically:
+    Open your browser to:
     ```
     http://127.0.0.1:8080/docs/
     ```
-    You'll find a list of HTML files. Click on any of them to launch a specific font analysis tool. For example, to view the PuePy Bulma example, navigate to `http://127.0.0.1:8080/docs/pyscript-puepy-bulma.html`.
+    Click any HTML file to launch that tool. Example: `pyscript-puepy-bulma.html`
 
 ## How to Use Boabro
 
-### Using the Example Tools (In-Browser)
+### Using the Example Tools
 
-The primary way to use Boabro is through the example HTML files located in the `docs/` directory. Each file demonstrates a different UI setup or feature:
+The `docs/` directory contains HTML examples demonstrating different UI setups:
+*   **Upload or Fetch**: Most tools accept local files or URLs
+*   **View Analysis**: Results display in categorized sections (metadata, tables, etc.)
 
-*   **Upload or Fetch**: Most tools will provide an interface to either upload a font file from your computer or fetch one from a URL.
-*   **View Analysis**: Once the font is loaded, the tool will display the analyzed information, often categorized into sections like metadata, table summaries, etc.
-
-Some of the available examples include integrations with:
-*   **PuePy** (with Bootstrap, Bulma, UIkit, FrankenUI)
+Available examples include integrations with:
+*   **PuePy** (Bootstrap, Bulma, UIkit, FrankenUI)
 *   **Alpine.js**, **Lit**, **Preact**, **HTMX**, **Vue.js**, **Web Components**
-*   **Gradio-Lite** and **Stlite** (standalone Streamlit in the browser)
-*   Direct PyScript features like filesystem access, IndexedDB, and web workers.
-*   The `docs` directory contains a comprehensive list, including:
-    *   `_pyscript-alpinejs.html`
-    *   `_pyscript-fs.html` (formerly `pyodide-fs.html`)
-    *   `_pyscript-htmx.html`
-    *   `_pyscript-indexeddb.html`
-    *   `_pyscript-lit.html`
-    *   `_pyscript-preact-signals.html`
-    *   `_pyscript-tailwindcss.html` (formerly `pyodide-tailwindcss.html`)
-    *   `_pyscript-vuejs.html`
-    *   `_pyscript-webcomponents.html`
-    *   `_pyscript-worker.html` (and `_pyscript-worker-script.py`)
-    *   `_pyscript-workerspool.html` (and `_pyscript-pool-worker.py`)
-    *   `pyscript-puepy-bootstrap.html`
-    *   `pyscript-puepy-bulma.html`
-    *   `pyscript-puepy-frankenui.html`
-    *   `pyscript-puepy-uikit.html`
-    *   `pyscript-mako.html`
-    *   `pyscript-solidjs.html` (experimental)
-    *   `pyscript-svelte.html` (experimental)
-    *   `gradio.html`
-    *   `stlite.html`
-    *   `pyodide-react.jsx` (status may vary)
+*   **Gradio-Lite** and **Stlite** (browser-based Streamlit)
+*   Direct PyScript features: filesystem access, IndexedDB, web workers
 
+See the `docs` directory for the complete list of HTML files.
 
-### Programmatic Usage (within PyScript/HTML)
+### Programmatic Usage
 
-If you are a developer looking to integrate Boabro's font analysis capabilities into your own PyScript-based projects:
+To integrate Boabro into your PyScript projects:
 
-1.  **Include `boabro.py`**: Ensure the `boabro.py` script (from `src/boabro/`) is accessible to your HTML page (e.g., by placing it in the same directory or configuring paths in PyScript).
-2.  **Import Functions**: In your Python code within a `<py-script>` tag or a Python web worker, you can import and use the core functions:
-
+1.  **Include `boabro.py`**: Place it where your HTML can access it
+2.  **Import Functions**:
     ```python
-    # In your PyScript code
     from boabro import fetch_font_bytes_from_url, analyze_font_data
-    # Font bytes can be obtained via fetch_font_bytes_from_url or by reading a local file.
 
     async def process_font_from_url(font_url):
         font_bytes = await fetch_font_bytes_from_url(font_url)
         if font_bytes:
             analysis_result = analyze_font_data(font_bytes, filename="myfont.otf")
-            # Process and display the result (e.g., convert to JS object, update DOM)
             print(analysis_result)
         else:
             print(f"Could not fetch font from {font_url}")
 
     async def process_local_font_file(js_file_proxy):
-        # 'js_file_proxy' typically comes from an event listener on an <input type="file">.
-        # It's a Pyodide proxy for the JavaScript File object.
         filename = js_file_proxy.name
-        array_buffer = await js_file_proxy.arrayBuffer() # This is a JavaScript ArrayBuffer
-        font_bytes = array_buffer.to_bytes() # Convert to Python bytes
+        array_buffer = await js_file_proxy.arrayBuffer()
+        font_bytes = array_buffer.to_bytes()
 
         if font_bytes:
             analysis_result = analyze_font_data(font_bytes, filename=filename)
-            # Process and display the result
             print(analysis_result)
     ```
 
-    The `fetch_font_bytes_from_url` function is designed to retrieve font data from a URL, handling potential CORS issues. The `analyze_font_data` function takes the font file's raw bytes and an optional filename, returning a dictionary with detailed font information.
+The `fetch_font_bytes_from_url` function handles CORS issues. The `analyze_font_data` function parses font bytes and returns detailed information.
 
 ### Command-Line Usage
 
-The `src/boabro/boabro.py` script itself is primarily a module intended for use within a PyScript environment. While it can be executed (`python src/boabro/boabro.py`), its `main()` function is currently a basic placeholder and does not offer command-line font analysis features. The core value lies in its functions being callable from browser-based Python.
-
----
+The `src/boabro/boabro.py` script is designed for browser use. While executable, its `main()` function is minimal and offers no CLI features. Use it within PyScript environments.
 
 ## Technical Deep Dive & Contributing
-
-This section provides a more detailed look into Boabro's architecture and guidelines for developers and contributors.
 
 ### How the Code Works
 
 #### Core Logic (`src/boabro/boabro.py`)
 
-The heart of Boabro's analysis capabilities resides in `src/boabro/boabro.py`. This module is designed to be used within a PyScript environment.
-
 *   **`fetch_font_bytes_from_url(url_str: str) -> Optional[bytes]`**:
-    *   This asynchronous function retrieves font file bytes from a URL.
-    *   It attempts GitHub raw URL conversion, then iterates through known CORS proxies, followed by a direct fetch, and finally a `mode="no-cors"` attempt.
-    *   Uses `pyodide.http.pyfetch` and includes common HTTP headers.
-    *   Returns `bytes` or `None`.
+    *   Asynchronous function that retrieves font bytes from URLs
+    *   Tries GitHub raw URL conversion, CORS proxies, direct fetch, then `mode="no-cors"`
+    *   Uses `pyodide.http.pyfetch` with common HTTP headers
+    *   Returns `bytes` or `None`
 
 *   **`analyze_font_data(font_bytes: bytes, filename: Optional[str] = "font") -> Dict[str, Any]`**:
-    *   Parses font `bytes` using `fontTools.ttLib.TTFont`.
-    *   Extracts:
-        *   Common name table entries (NameIDs 1-14, 16-25).
-        *   `upm` (unitsPerEm).
-        *   `numGlyphs`.
-        *   Sorted list of table tags.
-        *   All `nameTableRecords` with decoded strings.
-    *   Returns a dictionary of font information. Errors are logged and re-raised.
+    *   Parses font bytes using `fontTools.ttLib.TTFont`
+    *   Extracts name table entries (NameIDs 1-14, 16-25), `upm`, `numGlyphs`, table tags, decoded name records
+    *   Returns font information dictionary; logs and re-raises errors
 
 *   **Logging**:
-    *   Uses Python's `logging` module. `util_logger` for module-specific logs.
-    *   `_log_util_debug` helper attempts to also log to `js.console.log` in PyScript.
+    *   Uses Python's `logging` module
+    *   Attempts to log to `js.console.log` in PyScript environments
 
 #### PyScript Integration
 
-Python code runs in-browser via [PyScript](https://pyscript.net/)/[Pyodide](https://pyodide.org/), compiling Python and `fontTools` to WebAssembly. This enables client-side analysis. `fontTools` and other packages are declared in PyScript configuration (e.g., `<py-config>`).
+Python runs in-browser via [PyScript](https://pyscript.net/)/[Pyodide](https://pyodide.org/), compiling to WebAssembly. `fontTools` loads through PyScript configuration.
 
 #### UI Examples (`docs/`)
 
-The `docs/` directory contains HTML examples integrating `boabro.py` with various UI libraries/patterns. They handle UI, call core functions, and display results.
+HTML examples in `docs/` integrate `boabro.py` with various UI libraries. They handle UI interaction, call core functions, and display results.
 
-**File Naming Convention in `docs/`**:
-*   PyScript examples: `_pyscript-[feature_or_framework].html`.
-*   PuePy examples: `pyscript-puepy-[css_framework].html`.
-*   Standalone tools: e.g., `gradio.html`.
+**File Naming**:
+*   PyScript examples: `_pyscript-[feature_or_framework].html`
+*   PuePy examples: `pyscript-puepy-[css_framework].html`
+*   Standalone tools: e.g., `gradio.html`
 
 ### Project Structure
 
-*   **`src/boabro/`**: Core Python source (`boabro.py`, `test_boabro.py`).
-*   **`docs/`**: Runnable HTML examples (see list in "Using the Example Tools").
-*   **`tests/`**: Broader package-level tests (minimal).
-*   **`pyproject.toml`**: Project metadata, dev dependencies, build (Hatch), tool configs.
-*   **`.pre-commit-config.yaml`**: Pre-commit hook configuration.
-*   **`README.md`**: This file.
-*   **`LICENSE`**: MIT License.
-*   **`PROGRESS.md`**, **`TODO.md`**: Project tracking.
+*   **`src/boabro/`**: Core Python code (`boabro.py`, `test_boabro.py`)
+*   **`docs/`**: Runnable HTML examples
+*   **`tests/`**: Package-level tests
+*   **`pyproject.toml`**: Project metadata, dependencies, build config (Hatch)
+*   **`.pre-commit-config.yaml`**: Pre-commit hooks
+*   **`README.md`**: This file
+*   **`LICENSE`**: MIT License
+*   **`PROGRESS.md`**, **`TODO.md`**: Development tracking
 
-### Development Environment Setup
+### Development Setup
 
-1.  **Python**: Python 3.10+.
-2.  **Clone Repository**.
-3.  **Virtual Environment (Recommended)**:
+1.  **Python**: 3.10+
+2.  **Clone Repository**
+3.  **Virtual Environment**:
     ```bash
     python -m venv .venv
     source .venv/bin/activate  # Windows: .venv\Scripts\activate
@@ -201,79 +156,74 @@ The `docs/` directory contains HTML examples integrating `boabro.py` with variou
     hatch env create dev
     hatch shell dev
     ```
-4.  **Install Development Dependencies**:
-    If using Hatch, the previous step handles this. Otherwise, using pip:
+4.  **Install Dependencies**:
+    With Hatch: handled automatically
+    With pip:
     ```bash
     pip install -r requirements-dev.txt
     ```
-    Alternatively, for an editable install with development and test dependencies (ensure pip is up-to-date):
+    Or editable install:
     ```bash
     pip install -e .[dev,test]
     ```
-    Development dependencies are listed in `pyproject.toml`.
 
-### Code Quality & Pre-commit Hooks
+### Code Quality
 
-Uses `ruff` for linting/formatting and `mypy` for type checking (configs in `pyproject.toml`).
+Uses `ruff` for linting/formatting and `mypy` for type checking.
 
 **Pre-commit Hooks**:
-Automatically run checks (e.g., `ruff`) before commits.
-1.  **Install `pre-commit`**: `pip install pre-commit` (included in dev dependencies).
-2.  **Install Git Hooks**: In repo root, run `pre-commit install`.
-    Manual run: `pre-commit run --all-files`.
+1.  Install: `pip install pre-commit`
+2.  Setup: `pre-commit install` in repo root
+3.  Manual run: `pre-commit run --all-files`
 
 ### Testing
 
-*   **Unit Tests**: For `src/boabro/boabro.py` are in `src/boabro/test_boabro.py`.
+*   **Unit Tests**:
     ```bash
     python -m unittest src/boabro/test_boabro.py
     ```
-    Or with `pytest` (from dev dependencies):
+    Or with pytest:
     ```bash
     pytest src/boabro/test_boabro.py
     ```
-    Hatch users (scripts defined in `pyproject.toml` under `tool.hatch.envs.default.scripts`):
+    Hatch users:
     ```bash
-    hatch run default:test       # Runs tests
-    hatch run default:test-cov # For test coverage
+    hatch run default:test       # Tests
+    hatch run default:test-cov   # Coverage
     ```
 
-*   **Manual Smoke Testing**: Crucial after changes to `boabro.py` or `docs/` examples.
-    1.  Start local HTTP server (`python -m http.server 8080`).
-    2.  Open several HTML examples from `docs/`.
-    3.  Test local file uploads and font URLs.
-    4.  Check browser developer console for errors.
+*   **Manual Testing**:
+    1.  Start server: `python -m http.server 8080`
+    2.  Open several examples from `docs/`
+    3.  Test uploads and URLs
+    4.  Check browser console for errors
 
 ### Dependencies
 
-*   **Runtime (In-Browser)**: `fontTools`, loaded by PyScript as per HTML `<py-config>`.
-*   **Development**: Linters, formatters, test runners, build tools in `pyproject.toml` (`[project.optional-dependencies.dev]`, `[project.optional-dependencies.test]`).
+*   **Runtime**: `fontTools` (loaded by PyScript)
+*   **Development**: Linters, formatters, test runners in `pyproject.toml`
 
 ### Contributing
 
-Contributions are welcome!
-*   **Bugs/Enhancements**: Open an issue on GitHub.
-*   **Examples**: Improve existing or create new ones.
-*   **Code Contributions**:
-    1.  Fork, create a branch.
-    2.  Make changes, adhere to style (`ruff`), ensure tests pass. Add unit tests for new logic.
-    3.  Ensure pre-commit checks pass.
-    4.  Submit a pull request.
-    Align with project goals: browser-based font analysis, showcasing PyScript.
+*   **Bugs/Enhancements**: Open GitHub issues
+*   **Examples**: Improve or add new ones
+*   **Code**:
+    1.  Fork, create branch
+    2.  Follow style (`ruff`), pass tests, add unit tests
+    3.  Pre-commit checks must pass
+    4.  Submit pull request
+    Focus: browser-based font analysis, PyScript demonstrations
 
----
+## Progress Tracking
 
-## Progress Tracking & Development Status
-
-Project progress and status are tracked in:
-*   **`PROGRESS.md`**: Detailed report of completed tasks and milestones.
-*   **`TODO.md`**: Pending tasks, planned features, and known issues.
-Refer to these for the latest updates.
+See:
+*   **`PROGRESS.md`**: Completed tasks and milestones
+*   **`TODO.md`**: Pending work and known issues
 
 ## License
 
-This project is licensed under the MIT License. See the `LICENSE` file for full details.
+MIT License. See `LICENSE` file.
 
 ## Author
 
-Boabro is created and maintained by Adam Twardoch ([adam+github@twardoch.com](mailto:adam+github@twardoch.com)).
+Adam Twardoch ([adam+github@twardoch.com](mailto:adam+github@twardoch.com))
