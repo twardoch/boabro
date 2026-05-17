@@ -1,7 +1,10 @@
 #!/usr/bin/env python3
-"""boabro: 
+"""boabro: In-browser font analysis tools.
 
-Created by Adam Twardoch
+Fetch a font. Crack it open. Look inside.
+All running locally in the browser via PyScript. No server required.
+
+Created by Adam Twardoch.
 """
 
 from dataclasses import dataclass

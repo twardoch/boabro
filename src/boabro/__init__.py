@@ -1,5 +1,8 @@
 # this_file: src/boabro/__init__.py
-"""Boabro - Browser-based Font Analysis Tools."""
+"""Boabro: Rip open fonts directly in your browser.
+
+No uploads. No waiting. Just Python and fontTools running client-side.
+"""
 
 from .boabro import analyze_font_data, fetch_font_bytes_from_url, process_data, Config
 

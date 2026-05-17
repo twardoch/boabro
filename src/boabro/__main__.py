@@ -1,5 +1,9 @@
 # this_file: src/boabro/__main__.py
-"""CLI entry point for boabro."""
+"""CLI entry point for boabro.
+
+While Boabro is built for the browser, you can run it locally too.
+Feed it a font file, get the metadata out.
+"""
 
 import sys
 import argparse
@@ -11,7 +15,12 @@ from . import __version__
 
 
 def main() -> None:
-    """Main CLI entry point."""
+    """Run boabro from the command line.
+    
+    Parses arguments, checks if the file exists, reads the raw bytes, 
+    and hands them to `analyze_font_data`. Then formats the output 
+    as either raw JSON or a clean text summary.
+    """
     parser = argparse.ArgumentParser(
         description="Boabro - Browser-based font analysis tools"
     )
@@ -84,7 +93,12 @@ def main() -> None:
 
 
 def format_text_output(result: dict, verbose: bool = False) -> str:
-    """Format analysis result as human-readable text."""
+    """Format the font analysis results into readable text.
+    
+    Takes the raw dictionary from fontTools and shapes it into a clear, 
+    categorized block of text. Shows the basic IDs, technical metrics, 
+    and the list of tables holding the actual font data.
+    """
     lines = []
 
     # Basic info
