@@ -314,3 +314,7 @@ Thumbs.db
 __version__.py
 _private
 VERSION.txt
+
+# Generated codebase snapshots (codetoprompt / repomix)
+llms.txt
+md.txt

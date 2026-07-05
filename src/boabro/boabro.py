@@ -1,4 +1,5 @@
 #!/usr/bin/env python3
+# this_file: src/boabro/boabro.py
 """boabro: In-browser font analysis tools.
 
 Fetch a font. Crack it open. Look inside.
@@ -7,67 +8,73 @@ All running locally in the browser via PyScript. No server required.
 Created by Adam Twardoch.
 """
 
-from dataclasses import dataclass
-from typing import Any
+import io
 import logging
+import traceback
+from typing import Any
 
-__version__ = "0.1.0"
+from fontTools.ttLib import TTFont
 
-# Configure logging
+# `js`, `pyodide`, and `to_js` only exist inside the PyScript/Pyodide runtime.
+# Locally (tests, the CLI) they are absent, so we fall back to plain-Python stand-ins.
+# `document` and `pyodide` stay `None` off-browser; the fetch code guards on that.
+try:
+    from js import Object, console as js_console, document
+    from pyodide.ffi import to_js
+    import pyodide.http
+except ImportError:
+    js_console = print  # browser console.log -> local print
+
+    class DummyObject:
+        """Minimal stand-in for the JS `Object` used only for `Object.fromEntries`."""
+
+        @staticmethod
+        def fromEntries(entries: Any) -> dict[str, Any]:  # noqa: N802
+            return dict(entries)
+
+    Object = DummyObject
+    document = None
+    pyodide = None
+    to_js = None  # sentinel: header conversion is skipped when running locally
+
 logging.basicConfig(
     level=logging.INFO,
-    format="%(asctime)s - %(name)s - %(levelname)s - %(message)s"
+    format="%(asctime)s - %(name)s - %(levelname)s - %(message)s",
 )
 logger = logging.getLogger(__name__)
 
-
-@dataclass
-class Config:
-    """Configuration settings for boabro."""
-    name: str
-    value: str | int | float
-    options: dict[str, Any] | None = None
-
-# --- Font Analysis Utilities ---
-import io
-import traceback
-from fontTools.ttLib import TTFont
-# These are for type hinting and might not be directly available in all PyScript contexts
-# For actual execution, js and pyodide are provided by the PyScript environment.
-try:
-    from js import Object, document, console as js_console
-    import pyodide.http
-except ImportError:
-    # Fallbacks for environments where these might not be available (e.g. local Python)
-    js_console = print
-    # Define dummy Object and document for type checking if needed, or rely on dynamic nature
-    class DummyObject:
-        @staticmethod
-        def fromEntries(entries):
-            return dict(entries)
-    Object = DummyObject
-    document = None # type: ignore
-    pyodide = None # type: ignore
-
-
-# Centralized logging for utilities
+# Centralized logging for the font utilities.
 util_logger = logging.getLogger("boabro.font_utils")
-util_logger.setLevel(logging.INFO) # Default, can be overridden by main app if needed
+util_logger.setLevel(logging.INFO)  # Default; the host app may raise it.
 
-def _log_util_debug(message: str):
-    # In PyScript, direct print() goes to console. For JS console, use js.console.log
-    # This function is for Python-side logging of the util.
-    # Actual JS console logging should be handled by the calling script in the HTML if needed.
-    if util_logger.isEnabledFor(logging.DEBUG):
-         util_logger.debug(message)
-    # For PyScript environment, also print to browser console for easier debugging from HTML examples
-    try:
+
+def _log_util_debug(message: str) -> None:
+    """Emit a debug line to the Python logger and, in PyScript, the browser console.
+
+    Locally the message only surfaces when the logger is at DEBUG, so the CLI
+    stays quiet. In PyScript the real `console.log` mirrors it to the devtools
+    console, which is where the HTML examples want it.
+    """
+    util_logger.debug(message)
+    if hasattr(
+        js_console, "log"
+    ):  # real browser console, not the local `print` stand-in
         js_console.log(f"[BoabroUtilDebug] {message}")
-    except Exception: # js_console might not be available if not in PyScript
-        print(f"[BoabroUtilDebug] {message}")
 
 
-async def fetch_font_bytes_from_url(url_str: str) -> bytes | None:
+def _to_js_headers(headers_dict: dict[str, str]) -> Any:
+    """Convert a header dict to the JS object `pyodide.http.pyfetch` expects.
+
+    Inside PyScript `pyfetch` needs a real JS object, so we round-trip through
+    `to_js` + `Object.fromEntries`. Locally `to_js` is `None`, so we hand back
+    the plain dict untouched.
+    """
+    if to_js is None:
+        return headers_dict
+    return Object.fromEntries(to_js(headers_dict).entries())
+
+
+async def fetch_font_bytes_from_url(url_str: str) -> bytes | None:  # noqa: C901, PLR0912, PLR0915
     """Fetches font data from a given URL.
 
     This function attempts to retrieve font file bytes using several strategies:
@@ -95,37 +102,48 @@ async def fetch_font_bytes_from_url(url_str: str) -> bytes | None:
     try:
         # Determine headers. In PyScript, document.location might be available.
         # Default to generic referer/origin if not in a browser context with 'document'.
-        referer = document.location.href if document and hasattr(document, "location") else "https://example.com/"
-        origin = document.location.origin if document and hasattr(document, "location") else "https://example.com/"
+        referer = (
+            document.location.href
+            if document and hasattr(document, "location")
+            else "https://example.com/"
+        )
+        origin = (
+            document.location.origin
+            if document and hasattr(document, "location")
+            else "https://example.com/"
+        )
 
         headers_dict = {
             "User-Agent": "Mozilla/5.0 (BoabroFontInspector/1.0)",
             "Accept": "*/*",
             "Referer": referer,
-            "Origin": origin
+            "Origin": origin,
         }
         # In PyScript, headers must be a JS Object.
-        headers_js = Object.fromEntries(to_js(headers_dict).entries()) if "to_js" in globals() and "Object" in globals() else headers_dict
-
+        headers_js = _to_js_headers(headers_dict)
 
         cors_proxies = [
             "https://corsproxy.io/?url=",
             "https://api.allorigins.win/raw?url=",
             "https://cors.eu.org/",
-            "https://xofix.4kb.dev/?url="
+            "https://xofix.4kb.dev/?url=",
         ]
 
-        font_data_bytes = None
+        font_data_bytes: bytes | None = None
 
         # Try GitHub raw URL conversion first
         if "github.com" in url_str and "raw.githubusercontent.com" not in url_str:
-            raw_url = url_str.replace("github.com", "raw.githubusercontent.com").replace("/blob/", "/")
+            raw_url = url_str.replace(
+                "github.com", "raw.githubusercontent.com"
+            ).replace("/blob/", "/")
             _log_util_debug(f"Attempting GitHub raw URL: {raw_url}")
             try:
                 response = await pyodide.http.pyfetch(raw_url, headers=headers_js)
                 if response.status == 200:
                     font_data_bytes = await response.bytes()
-                    _log_util_debug(f"Successfully fetched {len(font_data_bytes)} bytes from raw GitHub URL.")
+                    _log_util_debug(
+                        f"Successfully fetched {len(font_data_bytes)} bytes from raw GitHub URL."
+                    )
             except Exception as e:
                 _log_util_debug(f"Raw GitHub URL request failed: {e!s}")
 
@@ -138,7 +156,9 @@ async def fetch_font_bytes_from_url(url_str: str) -> bytes | None:
                     response = await pyodide.http.pyfetch(proxy_url, headers=headers_js)
                     if response.status == 200:
                         font_data_bytes = await response.bytes()
-                        _log_util_debug(f"Successfully fetched {len(font_data_bytes)} bytes via proxy: {proxy_base}")
+                        _log_util_debug(
+                            f"Successfully fetched {len(font_data_bytes)} bytes via proxy: {proxy_base}"
+                        )
                         break
                 except Exception as e:
                     _log_util_debug(f"Proxy {proxy_base} request failed: {e!s}")
@@ -150,21 +170,26 @@ async def fetch_font_bytes_from_url(url_str: str) -> bytes | None:
                 response = await pyodide.http.pyfetch(url_str, headers=headers_js)
                 if response.status == 200:
                     font_data_bytes = await response.bytes()
-                    _log_util_debug(f"Successfully fetched {len(font_data_bytes)} bytes from direct URL.")
+                    _log_util_debug(
+                        f"Successfully fetched {len(font_data_bytes)} bytes from direct URL."
+                    )
             except Exception as e:
-                 _log_util_debug(f"Direct URL request failed: {e!s}")
+                _log_util_debug(f"Direct URL request failed: {e!s}")
 
         # Try no-cors as a last resort
         if not font_data_bytes:
             _log_util_debug(f"Attempting with no-cors mode for: {url_str}")
             try:
                 # For no-cors, headers might be restricted. Sending minimal.
-                no_cors_headers_dict = {"Accept": "*/*"}
-                no_cors_headers_js = Object.fromEntries(to_js(no_cors_headers_dict).entries()) if "to_js" in globals() and "Object" in globals() else no_cors_headers_dict
-                response = await pyodide.http.pyfetch(url_str, headers=no_cors_headers_js, mode="no-cors")
+                no_cors_headers_js = _to_js_headers({"Accept": "*/*"})
+                response = await pyodide.http.pyfetch(
+                    url_str, headers=no_cors_headers_js, mode="no-cors"
+                )
                 font_data_bytes = await response.bytes()
                 if font_data_bytes and len(font_data_bytes) > 0:
-                     _log_util_debug(f"Fetched {len(font_data_bytes)} bytes with no-cors mode (quality unknown).")
+                    _log_util_debug(
+                        f"Fetched {len(font_data_bytes)} bytes with no-cors mode (quality unknown)."
+                    )
                 else:
                     _log_util_debug(f"No-cors mode did not yield data for {url_str}.")
                     font_data_bytes = None
@@ -179,10 +204,15 @@ async def fetch_font_bytes_from_url(url_str: str) -> bytes | None:
         return font_data_bytes
 
     except Exception as e:
-        util_logger.error(f"Generic error in fetch_font_bytes_from_url for {url_str}: {e!s}\n{traceback.format_exc()}")
+        util_logger.error(
+            f"Generic error in fetch_font_bytes_from_url for {url_str}: {e!s}\n{traceback.format_exc()}"
+        )
         return None
 
-def analyze_font_data(font_bytes: bytes, filename: str | None = "font") -> dict[str, Any]:
+
+def analyze_font_data(
+    font_bytes: bytes, filename: str | None = "font"
+) -> dict[str, Any]:
     """Analyzes font data using fontTools and returns a structured dictionary.
 
     Args:
@@ -242,28 +272,36 @@ def analyze_font_data(font_bytes: bytes, filename: str | None = "font") -> dict[
 
         name_table = font["name"]
 
-        def get_name(nameID):
-            entry = name_table.getName(nameID, 3, 1, 0x409) or name_table.getName(nameID, 1, 0, 0)
+        def get_name(name_id: int) -> str:
+            # Prefer the Windows/Unicode/English record (3,1,0x409); fall back to
+            # the Macintosh/Roman record (1,0,0) that older fonts still carry.
+            entry = name_table.getName(name_id, 3, 1, 0x409) or name_table.getName(
+                name_id, 1, 0, 0
+            )
             return entry.toUnicode() if entry else "(N/A)"
 
-        name_records = []
+        name_records: list[dict[str, Any]] = []
         for record in name_table.names:
             try:
-                name_records.append({
-                    "nameID": record.nameID,
-                    "platformID": record.platformID,
-                    "platEncID": record.platEncID,
-                    "langID": record.langID,
-                    "string": record.toUnicode()
-                })
+                name_records.append(
+                    {
+                        "nameID": record.nameID,
+                        "platformID": record.platformID,
+                        "platEncID": record.platEncID,
+                        "langID": record.langID,
+                        "string": record.toUnicode(),
+                    }
+                )
             except Exception:
-                name_records.append({
-                    "nameID": record.nameID,
-                    "platformID": record.platformID,
-                    "platEncID": record.platEncID,
-                    "langID": record.langID,
-                    "string": "(could not decode)"
-                })
+                name_records.append(
+                    {
+                        "nameID": record.nameID,
+                        "platformID": record.platformID,
+                        "platEncID": record.platEncID,
+                        "langID": record.langID,
+                        "string": "(could not decode)",
+                    }
+                )
 
         result = {
             "fileName": filename,
@@ -293,63 +331,13 @@ def analyze_font_data(font_bytes: bytes, filename: str | None = "font") -> dict[
             "variationsPostScriptNamePrefix": get_name(25),
             "upm": font["head"].unitsPerEm,
             "numGlyphs": len(font.getGlyphOrder()),
-            "tables": sorted(list(font.keys())),
-            "nameTableRecords": name_records
+            "tables": sorted(font.keys()),
+            "nameTableRecords": name_records,
         }
         _log_util_debug(f"Analysis successful for {filename}.")
         return result
     except Exception as e:
-        util_logger.error(f"Error analyzing font {filename}: {e!s}\n{traceback.format_exc()}")
-        raise # Re-raise to allow calling function to handle it, or return an error dict.
-
-
-def process_data(
-    data: list[Any],
-    config: Config | None = None,
-    *,
-    debug: bool = False
-) -> dict[str, Any]:
-    """Process the input data according to configuration.
-    
-    Args:
-        data: Input data to process
-        config: Optional configuration settings
-        debug: Enable debug mode
-        
-    Returns:
-        Processed data as a dictionary
-        
-    Raises:
-        ValueError: If input data is invalid
-    """
-    if debug:
-        logger.setLevel(logging.DEBUG)
-        logger.debug("Debug mode enabled")
-
-    if not data:
-        raise ValueError("Input data cannot be empty")
-
-    # TODO: Implement data processing logic
-    result: dict[str, Any] = {}
-    return result
-
-
-def main() -> None:
-    """Main entry point for boabro."""
-    try:
-        # Example usage
-        config = Config(
-            name="default",
-            value="test",
-            options={"key": "value"}
+        util_logger.error(
+            f"Error analyzing font {filename}: {e!s}\n{traceback.format_exc()}"
         )
-        result = process_data([], config=config)
-        logger.info("Processing completed: %s", result)
-
-    except Exception as e:
-        logger.error("An error occurred: %s", str(e))
-        raise
-
-
-if __name__ == "__main__":
-    main()
+        raise  # Let the caller decide how to surface the failure.

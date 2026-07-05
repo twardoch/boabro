@@ -31,21 +31,44 @@ PyScript embeds a Python interpreter (via WebAssembly/Pyodide) directly in the p
 3. Extracting name table records, head table metrics, and the full glyph order
 4. Returning a structured dict the browser page can render
 
-## Running locally
+## The web app
 
-Clone the repo and open any HTML file in `examples/` in a modern browser:
+The browser inspector is a set of static PyScript pages under [`docs/`](docs/) —
+one per UI framework (PuePy, Bulma, Bootstrap, Gradio, stlite, and more). Each is
+self-contained: no build step, no `npm install`. The PyScript runtime loads from a
+pinned CDN release.
+
+Try one without cloning at <https://twardoch.github.io/boabro/>, or run it locally:
 
 ```bash
 git clone https://github.com/twardoch/boabro
 cd boabro
-# open examples/index.html in your browser
+python3 -m http.server --directory docs 8080
+# then open http://localhost:8080/pyscript-puepy-bootstrap.html
 ```
 
-No build step. No `npm install`. The PyScript runtime loads from a CDN.
+Serve over HTTP rather than `file://` — PyScript needs a real origin to fetch its
+runtime and to reach fonts through CORS proxies.
 
-## Using the Python module
+## The command line
 
-The core analysis logic is importable as a regular Python module for non-browser use:
+The same analysis runs outside the browser. Install from PyPI:
+
+```bash
+pip install boabro
+```
+
+Then point it at a font:
+
+```bash
+boabro MyFont.ttf                          # readable text summary
+boabro MyFont.ttf --verbose                # add designer, license, name records
+boabro MyFont.ttf --format json -o out.json  # machine-readable dump
+```
+
+## The Python module
+
+The core analysis logic is importable for use in your own scripts:
 
 ```python
 from boabro.boabro import analyze_font_data

@@ -1,250 +1,161 @@
 # this_file: tests/test_core.py
-"""Comprehensive tests for boabro core functionality."""
+"""Tests for boabro's font-analysis core."""
 
-import pytest
 import json
 from pathlib import Path
-from unittest.mock import Mock, patch, AsyncMock
-from boabro.boabro import analyze_font_data, fetch_font_bytes_from_url, Config, process_data
+from unittest.mock import AsyncMock, Mock, patch
+
+import pytest
+from fontTools.ttLib import TTLibError
+
+from boabro.boabro import analyze_font_data, fetch_font_bytes_from_url
+
+TEST_FONT = Path(__file__).parent.parent / "docs" / "testfont.ttf"
+
+
+@pytest.fixture
+def sample_font_bytes() -> bytes | None:
+    """Raw bytes of the bundled Abril Fatface test font, if present."""
+    if TEST_FONT.exists():
+        return TEST_FONT.read_bytes()
+    return None
 
 
 class TestAnalyzeFontData:
-    """Test suite for analyze_font_data function."""
+    """Exercise analyze_font_data against real and malformed input."""
 
-    @pytest.fixture
-    def sample_font_bytes(self):
-        """Load sample font bytes for testing."""
-        font_path = Path(__file__).parent.parent / "docs" / "testfont.ttf"
-        if font_path.exists():
-            with open(font_path, "rb") as f:
-                return f.read()
-        return None
-
-    def test_analyze_font_data_with_valid_font(self, sample_font_bytes):
-        """Test font analysis with a valid font file."""
+    def test_valid_font_shape(self, sample_font_bytes: bytes | None) -> None:
+        """A real font yields the documented dictionary shape and types."""
         if sample_font_bytes is None:
             pytest.skip("Test font not available")
 
         result = analyze_font_data(sample_font_bytes, "test.ttf")
 
-        assert isinstance(result, dict)
         assert result["fileName"] == "test.ttf"
-        assert "familyName" in result
-        assert "subfamily" in result
-        assert "upm" in result
-        assert "numGlyphs" in result
-        assert "tables" in result
-        assert "nameTableRecords" in result
-
-        # Check data types
         assert isinstance(result["upm"], int)
         assert isinstance(result["numGlyphs"], int)
         assert isinstance(result["tables"], list)
         assert isinstance(result["nameTableRecords"], list)
 
-    def test_analyze_font_data_with_empty_bytes(self):
-        """Test error handling with empty font bytes."""
-        with pytest.raises(Exception):
-            analyze_font_data(b"", "empty.ttf")
-
-    def test_analyze_font_data_with_invalid_bytes(self):
-        """Test error handling with invalid font bytes."""
-        with pytest.raises(Exception):
-            analyze_font_data(b"invalid font data", "invalid.ttf")
-
-    def test_analyze_font_data_with_none_bytes(self):
-        """Test error handling with None bytes."""
-        with pytest.raises(TypeError):
-            analyze_font_data(None, "none.ttf")
-
-    def test_analyze_font_data_name_table_records_structure(self, sample_font_bytes):
-        """Test name table records structure."""
+    def test_known_font_values(self, sample_font_bytes: bytes | None) -> None:
+        """The bundled font parses to its known Abril Fatface metadata."""
         if sample_font_bytes is None:
             pytest.skip("Test font not available")
 
-        result = analyze_font_data(sample_font_bytes, "test.ttf")
+        result = analyze_font_data(sample_font_bytes, "testfont.ttf")
 
-        name_records = result["nameTableRecords"]
-        assert len(name_records) > 0
+        assert result["familyName"] == "Abril Fatface"
+        assert result["subfamily"] == "Regular"
+        assert result["psName"] == "AbrilFatface-Regular"
+        assert result["upm"] == 1000
+        assert result["numGlyphs"] > 0
+        assert "name" in result["tables"]
+        assert "head" in result["tables"]
 
-        # Check structure of first record
-        first_record = name_records[0]
-        required_keys = ["nameID", "platformID", "platEncID", "langID", "string"]
-        for key in required_keys:
-            assert key in first_record
+    def test_empty_bytes_raises(self) -> None:
+        """Empty input is not a font; fontTools rejects it."""
+        with pytest.raises(TTLibError):
+            analyze_font_data(b"", "empty.ttf")
 
-        # Check data types
-        assert isinstance(first_record["nameID"], int)
-        assert isinstance(first_record["platformID"], int)
-        assert isinstance(first_record["platEncID"], int)
-        assert isinstance(first_record["langID"], int)
-        assert isinstance(first_record["string"], str)
+    def test_invalid_bytes_raises(self) -> None:
+        """Garbage bytes are not a font; fontTools rejects them."""
+        with pytest.raises(TTLibError):
+            analyze_font_data(b"invalid font data", "invalid.ttf")
+
+    def test_none_bytes_raises(self) -> None:
+        """Passing None instead of bytes is a programming error."""
+        with pytest.raises(TypeError):
+            analyze_font_data(None, "none.ttf")  # type: ignore[arg-type]
+
+    def test_name_record_structure(self, sample_font_bytes: bytes | None) -> None:
+        """Each name record carries the five documented, typed fields."""
+        if sample_font_bytes is None:
+            pytest.skip("Test font not available")
+
+        records = analyze_font_data(sample_font_bytes, "test.ttf")["nameTableRecords"]
+        assert records
+
+        first = records[0]
+        assert isinstance(first["nameID"], int)
+        assert isinstance(first["platformID"], int)
+        assert isinstance(first["platEncID"], int)
+        assert isinstance(first["langID"], int)
+        assert isinstance(first["string"], str)
 
 
 class TestFetchFontBytesFromUrl:
-    """Test suite for fetch_font_bytes_from_url function."""
+    """Exercise the URL fetch strategies without hitting the network."""
 
     @pytest.mark.asyncio
-    async def test_fetch_font_bytes_invalid_url(self):
-        """Test error handling with invalid URL."""
-        result = await fetch_font_bytes_from_url("not-a-url")
-        assert result is None
+    async def test_invalid_url(self) -> None:
+        assert await fetch_font_bytes_from_url("not-a-url") is None
 
     @pytest.mark.asyncio
-    async def test_fetch_font_bytes_empty_url(self):
-        """Test error handling with empty URL."""
-        result = await fetch_font_bytes_from_url("")
-        assert result is None
+    async def test_empty_url(self) -> None:
+        assert await fetch_font_bytes_from_url("") is None
 
     @pytest.mark.asyncio
-    async def test_fetch_font_bytes_none_url(self):
-        """Test error handling with None URL."""
-        result = await fetch_font_bytes_from_url(None)
-        assert result is None
+    async def test_none_url(self) -> None:
+        assert await fetch_font_bytes_from_url(None) is None  # type: ignore[arg-type]
 
     @pytest.mark.asyncio
     @patch("boabro.boabro.pyodide")
-    async def test_fetch_font_bytes_github_conversion(self, mock_pyodide):
-        """Test GitHub URL conversion to raw format."""
-        mock_response = Mock()
-        mock_response.status = 200
-        mock_response.bytes = AsyncMock(return_value=b"font data")
-        mock_pyodide.http.pyfetch = AsyncMock(return_value=mock_response)
+    async def test_github_url_conversion(self, mock_pyodide: Mock) -> None:
+        """A GitHub blob URL is rewritten to raw.githubusercontent.com first."""
+        response = Mock()
+        response.status = 200
+        response.bytes = AsyncMock(return_value=b"font data")
+        mock_pyodide.http.pyfetch = AsyncMock(return_value=response)
 
         url = "https://github.com/user/repo/blob/main/font.ttf"
-        result = await fetch_font_bytes_from_url(url)
+        await fetch_font_bytes_from_url(url)
 
-        # Should convert to raw URL and fetch
-        expected_raw_url = "https://raw.githubusercontent.com/user/repo/main/font.ttf"
-        mock_pyodide.http.pyfetch.assert_called()
-        call_args = mock_pyodide.http.pyfetch.call_args_list[0][0]
-        assert call_args[0] == expected_raw_url
+        first_call_url = mock_pyodide.http.pyfetch.call_args_list[0][0][0]
+        assert (
+            first_call_url
+            == "https://raw.githubusercontent.com/user/repo/main/font.ttf"
+        )
 
     @pytest.mark.asyncio
     @patch("boabro.boabro.pyodide")
-    async def test_fetch_font_bytes_cors_proxy_fallback(self, mock_pyodide):
-        """Test CORS proxy fallback mechanism."""
-        # Mock failed direct fetch, successful proxy fetch
-        mock_response_fail = Mock()
-        mock_response_fail.status = 404
+    async def test_cors_proxy_fallback(self, mock_pyodide: Mock) -> None:
+        """A failing first proxy falls through to the next until one succeeds."""
+        fail = Mock()
+        fail.status = 404
+        ok = Mock()
+        ok.status = 200
+        ok.bytes = AsyncMock(return_value=b"font data")
+        mock_pyodide.http.pyfetch = AsyncMock(side_effect=[fail, ok])
 
-        mock_response_success = Mock()
-        mock_response_success.status = 200
-        mock_response_success.bytes = AsyncMock(return_value=b"font data")
-
-        mock_pyodide.http.pyfetch = AsyncMock(side_effect=[
-            mock_response_fail,  # Direct fetch fails
-            mock_response_success  # Proxy fetch succeeds
-        ])
-
-        url = "https://example.com/font.ttf"
-        result = await fetch_font_bytes_from_url(url)
+        result = await fetch_font_bytes_from_url("https://example.com/font.ttf")
 
         assert result == b"font data"
         assert mock_pyodide.http.pyfetch.call_count >= 2
 
 
-class TestConfig:
-    """Test suite for Config class."""
-
-    def test_config_creation(self):
-        """Test Config object creation."""
-        config = Config(name="test", value="value")
-        assert config.name == "test"
-        assert config.value == "value"
-        assert config.options is None
-
-    def test_config_with_options(self):
-        """Test Config object with options."""
-        options = {"key1": "value1", "key2": 42}
-        config = Config(name="test", value="value", options=options)
-        assert config.options == options
-
-    def test_config_different_value_types(self):
-        """Test Config with different value types."""
-        config_str = Config(name="test", value="string")
-        config_int = Config(name="test", value=123)
-        config_float = Config(name="test", value=3.14)
-
-        assert isinstance(config_str.value, str)
-        assert isinstance(config_int.value, int)
-        assert isinstance(config_float.value, float)
-
-
-class TestProcessData:
-    """Test suite for process_data function."""
-
-    def test_process_data_empty_input(self):
-        """Test error handling with empty input."""
-        with pytest.raises(ValueError, match="Input data cannot be empty"):
-            process_data([])
-
-    def test_process_data_none_input(self):
-        """Test error handling with None input."""
-        with pytest.raises(ValueError, match="Input data cannot be empty"):
-            process_data(None)
-
-    def test_process_data_with_config(self):
-        """Test process_data with config parameter."""
-        config = Config(name="test", value="value")
-        result = process_data(["data"], config=config)
-        assert isinstance(result, dict)
-
-    def test_process_data_debug_mode(self):
-        """Test process_data in debug mode."""
-        with patch("boabro.boabro.logger") as mock_logger:
-            result = process_data(["data"], debug=True)
-            mock_logger.setLevel.assert_called_once()
-            assert isinstance(result, dict)
-
-    def test_process_data_valid_input(self):
-        """Test process_data with valid input."""
-        result = process_data(["item1", "item2"])
-        assert isinstance(result, dict)
-
-
 class TestIntegration:
-    """Integration tests for boabro functionality."""
+    """End-to-end checks over the bundled font."""
 
-    def test_version_import(self):
-        """Test that version can be imported."""
-        from boabro import __version__
-        assert isinstance(__version__, str)
-        assert len(__version__) > 0
+    def test_version_import(self) -> None:
+        import boabro
 
-    def test_all_imports(self):
-        """Test that all public functions can be imported."""
-        from boabro import analyze_font_data, fetch_font_bytes_from_url, process_data, Config
+        assert isinstance(boabro.__version__, str)
+        assert boabro.__version__
 
-        assert callable(analyze_font_data)
-        assert callable(fetch_font_bytes_from_url)
-        assert callable(process_data)
-        assert Config is not None
-
-    def test_end_to_end_analysis(self):
-        """Test end-to-end font analysis workflow."""
-        font_path = Path(__file__).parent.parent / "docs" / "testfont.ttf"
-        if not font_path.exists():
+    def test_end_to_end_analysis(self, sample_font_bytes: bytes | None) -> None:
+        """Analyze the bundled font and confirm the result is JSON-serializable."""
+        if sample_font_bytes is None:
             pytest.skip("Test font not available")
 
-        # Load font
-        with open(font_path, "rb") as f:
-            font_bytes = f.read()
+        result = analyze_font_data(sample_font_bytes, "testfont.ttf")
 
-        # Analyze font
-        result = analyze_font_data(font_bytes, font_path.name)
-
-        # Verify essential information is present
-        assert result["fileName"] == font_path.name
         assert result["familyName"] != "(N/A)"
         assert result["upm"] > 0
         assert result["numGlyphs"] > 0
-        assert len(result["tables"]) > 0
-        assert len(result["nameTableRecords"]) > 0
+        assert result["tables"]
+        assert result["nameTableRecords"]
 
-        # Test JSON serialization
-        json_str = json.dumps(result)
-        parsed = json.loads(json_str)
+        parsed = json.loads(json.dumps(result))
         assert parsed["fileName"] == result["fileName"]
 
 

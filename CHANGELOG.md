@@ -8,6 +8,36 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ## [Unreleased]
 
 ### Changed
+- Moved all module-level imports to the top of `boabro.py` and gave the
+  browser-runtime imports (`js`, `pyodide`, `to_js`) one honest fallback block.
+- `_log_util_debug` now stays silent on the command line (logger-gated) and only
+  mirrors to the real browser console, so the CLI output is clean.
+- Type-annotated the name-table extraction and header helpers; added a
+  `_to_js_headers` helper that replaces the always-false `"to_js" in globals()`
+  guard that ruff and mypy flagged.
+- Rewrote the test suite: one `tests/` copy (removed the duplicate that shipped
+  inside the package), stronger fixture-font assertions, precise `TTLibError`
+  expectations instead of bare `Exception`.
+- Modernized CI: `ci.yml` is now a focused web-smoke check (the duplicate test
+  matrix moved out), `release.yml` drops the PyInstaller binary matrix and its
+  duplicated inline CLI in favour of the packaged `boabro` console script.
+
+### Removed
+- Template scaffolding that never did anything: `Config`, `process_data` (a
+  `# TODO` stub returning `{}`), and the unused `main()` in `boabro.py`.
+
+### Added
+- `pytest-asyncio` to the test extra — the async fetch tests need it, and CI
+  was silently missing it.
+- mypy overrides for the unstubbed `fontTools` and browser-only modules.
+- Project icon at `docs/assets/icon.png`.
+- `llms.txt` / `md.txt` (generated snapshots) added to `.gitignore`.
+
+### Documentation
+- README: fixed the dead `examples/` path (pages live in `docs/`), documented
+  the `boabro` CLI and `pip install`, and how to serve the web app locally.
+
+### Historical
 - Major refactoring of core logic into centralized `src/boabro/boabro.py` module
 - All PyScript examples now import and use shared utilities from the core module
 - Renamed examples with underscore prefix (_) to indicate working/stable status

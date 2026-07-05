@@ -5,50 +5,40 @@ While Boabro is built for the browser, you can run it locally too.
 Feed it a font file, get the metadata out.
 """
 
-import sys
 import argparse
 import json
+import sys
+import traceback
 from pathlib import Path
+from typing import Any
 
-from .boabro import analyze_font_data
 from . import __version__
+from .boabro import analyze_font_data
 
 
 def main() -> None:
     """Run boabro from the command line.
-    
-    Parses arguments, checks if the file exists, reads the raw bytes, 
-    and hands them to `analyze_font_data`. Then formats the output 
+
+    Parses arguments, checks if the file exists, reads the raw bytes,
+    and hands them to `analyze_font_data`. Then formats the output
     as either raw JSON or a clean text summary.
     """
     parser = argparse.ArgumentParser(
         description="Boabro - Browser-based font analysis tools"
     )
+    parser.add_argument("--version", action="version", version=f"boabro {__version__}")
     parser.add_argument(
-        "--version",
-        action="version",
-        version=f"boabro {__version__}"
+        "font_file", help="Font file to analyze (TTF, OTF, WOFF, WOFF2)"
     )
-    parser.add_argument(
-        "font_file",
-        help="Font file to analyze (TTF, OTF, WOFF, WOFF2)"
-    )
-    parser.add_argument(
-        "--output",
-        "-o",
-        help="Output file (default: stdout)"
-    )
+    parser.add_argument("--output", "-o", help="Output file (default: stdout)")
     parser.add_argument(
         "--format",
         choices=["json", "text"],
         default="text",
-        help="Output format (default: text)"
+        help="Output format (default: text)",
     )
     parser.add_argument(
-        "--verbose",
-        "-v",
-        action="store_true",
-        help="Enable verbose output"
+        "--verbose", "-v", action="store_true", help="Enable verbose output"
     )
 
     args = parser.parse_args()
@@ -73,7 +63,7 @@ def main() -> None:
         if args.format == "json":
             output = json.dumps(result, indent=2)
         else:
-            output = format_text_output(result, args.verbose)
+            output = format_text_output(result, verbose=args.verbose)
 
         # Write output
         if args.output:
@@ -87,16 +77,15 @@ def main() -> None:
     except Exception as e:
         print(f"Error analyzing font: {e}", file=sys.stderr)
         if args.verbose:
-            import traceback
             traceback.print_exc()
         sys.exit(1)
 
 
-def format_text_output(result: dict, verbose: bool = False) -> str:
+def format_text_output(result: dict[str, Any], *, verbose: bool = False) -> str:
     """Format the font analysis results into readable text.
-    
-    Takes the raw dictionary from fontTools and shapes it into a clear, 
-    categorized block of text. Shows the basic IDs, technical metrics, 
+
+    Takes the raw dictionary from fontTools and shapes it into a clear,
+    categorized block of text. Shows the basic IDs, technical metrics,
     and the list of tables holding the actual font data.
     """
     lines = []
@@ -120,7 +109,7 @@ def format_text_output(result: dict, verbose: bool = False) -> str:
     # Tables
     lines.append(f"OpenType tables ({len(result['tables'])}):")
     for i, table in enumerate(result["tables"]):
-        lines.append(f"  {i+1:2d}. {table}")
+        lines.append(f"  {i + 1:2d}. {table}")
     lines.append("")
 
     # Additional info if verbose
@@ -139,7 +128,7 @@ def format_text_output(result: dict, verbose: bool = False) -> str:
         # Show some name records
         if name_records:
             lines.append("Sample name records:")
-            for i, record in enumerate(name_records[:10]):  # Show first 10
+            for record in name_records[:10]:  # Show first 10
                 lines.append(f"  {record['nameID']:2d}: {record['string']}")
             if len(name_records) > 10:
                 lines.append(f"  ... and {len(name_records) - 10} more")
